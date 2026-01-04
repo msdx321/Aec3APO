@@ -1,0 +1,28 @@
+[Version]
+Signature   = "$WINDOWS NT$"
+Class       = Extension
+ClassGuid   = {e2f84ce7-8efa-411c-aa69-97454ca4cb57}
+Provider    = %ProviderName%
+ExtensionId = {BFDC3303-1859-401A-AF29-E7EBB8638968}
+PnpLockDown = 1
+DriverVer   = 01/01/2026,1.0.0.0
+CatalogFile = aec3apo.cat
+
+[Manufacturer]
+%MfgName% = Aec3ApoExt,NTamd64
+
+[Aec3ApoExt.NTamd64]
+%Ext.DeviceDesc% = Aec3ApoExt_Install,COMPUTER\Generic
+
+[Aec3ApoExt_Install]
+
+[Aec3ApoExt_Install.Components]
+AddComponent = Aec3EffectPack,,AecApo_AddComponent
+
+[AecApo_AddComponent]
+ComponentIDs = VEN_MSDX&AUDIO_EFFECTPACK_AECAPO
+
+[Strings]
+MfgName                 = "msdx321"
+ProviderName            = "msdx321"
+Ext.DeviceDesc          = "Aec3Apo Extension"

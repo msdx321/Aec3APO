@@ -1,0 +1,13 @@
+HKCR
+{
+        NoRemove CLSID
+        {
+                ForceRemove {FFC5F744-2AE1-4761-8478-FCD65F3E09C7} = s 'MSDX AEC APO MFX Class'
+                {
+                        InprocServer32 = s '%MODULE%'
+                        {
+                                val ThreadingModel = s 'Both'
+                        }
+                }
+        }
+}
