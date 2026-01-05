@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|ARM64">
@@ -112,6 +112,7 @@
   </ItemDefinitionGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <UseOfAtl>Dynamic</UseOfAtl>
+    <RunCodeAnalysis>false</RunCodeAnalysis>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">
     <UseOfAtl>Dynamic</UseOfAtl>
@@ -128,10 +129,16 @@
       <TreatWarningAsError>true</TreatWarningAsError>
       <WarningLevel>Level4</WarningLevel>
       <PreprocessorDefinitions>%(PreprocessorDefinitions);_WINDLL;_USRDLL;UNICODE;_UNICODE;NOMINMAX</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);$(DDK_INC_PATH);include;src;.;$(IntDir);third_party\speexdsp\include;build\speexdsp\include;third_party\speexdsp\libspeexdsp;third_party\speexdsp\win32</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);$(DDK_INC_PATH);include;src;.;$(IntDir);third_party\speexdsp\include;build\speexdsp\include;third_party\speexdsp\libspeexdsp;third_party\speexdsp\win32;third_party\rnnoise\include;third_party\rnnoise\src;rnnoise_model</AdditionalIncludeDirectories>
       <ExceptionHandling>
       </ExceptionHandling>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <EnableFiberSafeOptimizations>true</EnableFiberSafeOptimizations>
+      <WholeProgramOptimization>true</WholeProgramOptimization>
+      <OmitFramePointers>true</OmitFramePointers>
+      <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
+      <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
     </ClCompile>
     <Midl>
       <PreprocessorDefinitions>%(PreprocessorDefinitions);_WINDLL;_USRDLL;UNICODE;_UNICODE</PreprocessorDefinitions>
@@ -146,14 +153,17 @@
       <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);$(DDK_INC_PATH);include;src;.</AdditionalIncludeDirectories>
     </ResourceCompile>
     <Link>
-      <AdditionalDependencies>%(AdditionalDependencies);Kernel32.lib;ole32.lib;oleaut32.lib;advapi32.lib;user32.lib;uuid.lib;Propsys.lib;AudioBaseProcessingObjectV140.lib;audiomediatypecrt.lib;AudioEng.lib;winmm.lib;speexdsp.lib</AdditionalDependencies>
-      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);build\speexdsp\$(Configuration)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>%(AdditionalDependencies);Kernel32.lib;ole32.lib;oleaut32.lib;advapi32.lib;user32.lib;uuid.lib;Propsys.lib;AudioBaseProcessingObjectV140.lib;audiomediatypecrt.lib;AudioEng.lib;winmm.lib;speexdsp.lib;rnnoise.lib</AdditionalDependencies>
+      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);build\speexdsp\$(Configuration);build\rnnoise\$(Configuration)</AdditionalLibraryDirectories>
       <ModuleDefinitionFile>src\AecApoDll.def</ModuleDefinitionFile>
       <AdditionalOptions>/ignore:4217,4049 %(AdditionalOptions)</AdditionalOptions>
+      <LinkTimeCodeGeneration>UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
     </Link>
     <PreBuildEvent>
-      <Command>cmake -S "$(ProjectDir)cmake\speexdsp" -B "$(ProjectDir)build\speexdsp" -G "Visual Studio 17 2022" -A $(Platform)
-cmake --build "$(ProjectDir)build\speexdsp" --config $(Configuration)</Command>
+      <Command>cmake -S "$(ProjectDir)cmake\speexdsp" -B "$(ProjectDir)build\speexdsp" -G "Visual Studio 18 2026" -A $(Platform)
+cmake --build "$(ProjectDir)build\speexdsp" --config $(Configuration)
+  cmake -S "$(ProjectDir)cmake\rnnoise" -B "$(ProjectDir)build\rnnoise" -G "Visual Studio 18 2026" -A $(Platform)
+  cmake --build "$(ProjectDir)build\rnnoise" --config $(Configuration)</Command>
     </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">
@@ -162,7 +172,7 @@ cmake --build "$(ProjectDir)build\speexdsp" --config $(Configuration)</Command>
       <TreatWarningAsError>true</TreatWarningAsError>
       <WarningLevel>Level4</WarningLevel>
       <PreprocessorDefinitions>%(PreprocessorDefinitions);_WINDLL;_USRDLL;UNICODE;_UNICODE;NOMINMAX</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);$(DDK_INC_PATH);include;src;.;$(IntDir);third_party\speexdsp\include;build\speexdsp\include;third_party\speexdsp\libspeexdsp;third_party\speexdsp\win32</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);$(DDK_INC_PATH);include;src;.;$(IntDir);third_party\speexdsp\include;build\speexdsp\include;third_party\speexdsp\libspeexdsp;third_party\speexdsp\win32;third_party\rnnoise\include;third_party\rnnoise\src;rnnoise_model</AdditionalIncludeDirectories>
       <ExceptionHandling>
       </ExceptionHandling>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
@@ -180,14 +190,16 @@ cmake --build "$(ProjectDir)build\speexdsp" --config $(Configuration)</Command>
       <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);$(DDK_INC_PATH);include;src;.</AdditionalIncludeDirectories>
     </ResourceCompile>
     <Link>
-      <AdditionalDependencies>%(AdditionalDependencies);Kernel32.lib;ole32.lib;oleaut32.lib;advapi32.lib;user32.lib;uuid.lib;Propsys.lib;AudioBaseProcessingObjectV140.lib;audiomediatypecrt.lib;AudioEng.lib;winmm.lib;speexdsp.lib</AdditionalDependencies>
-      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);build\speexdsp\$(Configuration)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>%(AdditionalDependencies);Kernel32.lib;ole32.lib;oleaut32.lib;advapi32.lib;user32.lib;uuid.lib;Propsys.lib;AudioBaseProcessingObjectV140.lib;audiomediatypecrt.lib;AudioEng.lib;winmm.lib;speexdsp.lib;rnnoise.lib</AdditionalDependencies>
+      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);build\speexdsp\$(Configuration);build\rnnoise\$(Configuration)</AdditionalLibraryDirectories>
       <ModuleDefinitionFile>src\AecApoDll.def</ModuleDefinitionFile>
       <AdditionalOptions>/ignore:4217,4049 %(AdditionalOptions)</AdditionalOptions>
     </Link>
     <PreBuildEvent>
-      <Command>cmake -S "$(ProjectDir)cmake\speexdsp" -B "$(ProjectDir)build\speexdsp" -G "Visual Studio 17 2022" -A $(Platform)
-cmake --build "$(ProjectDir)build\speexdsp" --config $(Configuration)</Command>
+      <Command>cmake -S "$(ProjectDir)cmake\speexdsp" -B "$(ProjectDir)build\speexdsp" -G "Visual Studio 18 2026" -A $(Platform)
+cmake --build "$(ProjectDir)build\speexdsp" --config $(Configuration)
+  cmake -S "$(ProjectDir)cmake\rnnoise" -B "$(ProjectDir)build\rnnoise" -G "Visual Studio 18 2026" -A $(Platform)
+  cmake --build "$(ProjectDir)build\rnnoise" --config $(Configuration)</Command>
     </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
@@ -196,7 +208,7 @@ cmake --build "$(ProjectDir)build\speexdsp" --config $(Configuration)</Command>
       <TreatWarningAsError>true</TreatWarningAsError>
       <WarningLevel>Level4</WarningLevel>
       <PreprocessorDefinitions>%(PreprocessorDefinitions);_WINDLL;_USRDLL;UNICODE;_UNICODE;NOMINMAX</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);$(DDK_INC_PATH);include;src;.;$(IntDir);third_party\speexdsp\include;build\speexdsp\include;third_party\speexdsp\libspeexdsp;third_party\speexdsp\win32</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);$(DDK_INC_PATH);include;src;.;$(IntDir);third_party\speexdsp\include;build\speexdsp\include;third_party\speexdsp\libspeexdsp;third_party\speexdsp\win32;third_party\rnnoise\include;third_party\rnnoise\src;rnnoise_model</AdditionalIncludeDirectories>
       <ExceptionHandling>
       </ExceptionHandling>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
@@ -214,14 +226,16 @@ cmake --build "$(ProjectDir)build\speexdsp" --config $(Configuration)</Command>
       <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);$(DDK_INC_PATH);include;src;.</AdditionalIncludeDirectories>
     </ResourceCompile>
     <Link>
-      <AdditionalDependencies>%(AdditionalDependencies);Kernel32.lib;ole32.lib;oleaut32.lib;advapi32.lib;user32.lib;uuid.lib;Propsys.lib;AudioBaseProcessingObjectV140.lib;audiomediatypecrt.lib;AudioEng.lib;winmm.lib;speexdsp.lib</AdditionalDependencies>
-      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);build\speexdsp\$(Configuration)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>%(AdditionalDependencies);Kernel32.lib;ole32.lib;oleaut32.lib;advapi32.lib;user32.lib;uuid.lib;Propsys.lib;AudioBaseProcessingObjectV140.lib;audiomediatypecrt.lib;AudioEng.lib;winmm.lib;speexdsp.lib;rnnoise.lib</AdditionalDependencies>
+      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);build\speexdsp\$(Configuration);build\rnnoise\$(Configuration)</AdditionalLibraryDirectories>
       <ModuleDefinitionFile>src\AecApoDll.def</ModuleDefinitionFile>
       <AdditionalOptions>/ignore:4217,4049 %(AdditionalOptions)</AdditionalOptions>
     </Link>
     <PreBuildEvent>
-      <Command>cmake -S "$(ProjectDir)cmake\speexdsp" -B "$(ProjectDir)build\speexdsp" -G "Visual Studio 17 2022" -A $(Platform)
-cmake --build "$(ProjectDir)build\speexdsp" --config $(Configuration)</Command>
+      <Command>cmake -S "$(ProjectDir)cmake\speexdsp" -B "$(ProjectDir)build\speexdsp" -G "Visual Studio 18 2026" -A $(Platform)
+cmake --build "$(ProjectDir)build\speexdsp" --config $(Configuration)
+  cmake -S "$(ProjectDir)cmake\rnnoise" -B "$(ProjectDir)build\rnnoise" -G "Visual Studio 18 2026" -A $(Platform)
+  cmake --build "$(ProjectDir)build\rnnoise" --config $(Configuration)</Command>
     </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">
@@ -230,7 +244,7 @@ cmake --build "$(ProjectDir)build\speexdsp" --config $(Configuration)</Command>
       <TreatWarningAsError>true</TreatWarningAsError>
       <WarningLevel>Level4</WarningLevel>
       <PreprocessorDefinitions>%(PreprocessorDefinitions);_WINDLL;_USRDLL;UNICODE;_UNICODE;NOMINMAX</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);$(DDK_INC_PATH);include;src;.;$(IntDir);third_party\speexdsp\include;build\speexdsp\include;third_party\speexdsp\libspeexdsp;third_party\speexdsp\win32</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);$(DDK_INC_PATH);include;src;.;$(IntDir);third_party\speexdsp\include;build\speexdsp\include;third_party\speexdsp\libspeexdsp;third_party\speexdsp\win32;third_party\rnnoise\include;third_party\rnnoise\src;rnnoise_model</AdditionalIncludeDirectories>
       <ExceptionHandling>
       </ExceptionHandling>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
@@ -248,14 +262,16 @@ cmake --build "$(ProjectDir)build\speexdsp" --config $(Configuration)</Command>
       <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);$(DDK_INC_PATH);include;src;.</AdditionalIncludeDirectories>
     </ResourceCompile>
     <Link>
-      <AdditionalDependencies>%(AdditionalDependencies);Kernel32.lib;ole32.lib;oleaut32.lib;advapi32.lib;user32.lib;uuid.lib;Propsys.lib;AudioBaseProcessingObjectV140.lib;audiomediatypecrt.lib;AudioEng.lib;winmm.lib;speexdsp.lib</AdditionalDependencies>
-      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);build\speexdsp\$(Configuration)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>%(AdditionalDependencies);Kernel32.lib;ole32.lib;oleaut32.lib;advapi32.lib;user32.lib;uuid.lib;Propsys.lib;AudioBaseProcessingObjectV140.lib;audiomediatypecrt.lib;AudioEng.lib;winmm.lib;speexdsp.lib;rnnoise.lib</AdditionalDependencies>
+      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);build\speexdsp\$(Configuration);build\rnnoise\$(Configuration)</AdditionalLibraryDirectories>
       <ModuleDefinitionFile>src\AecApoDll.def</ModuleDefinitionFile>
       <AdditionalOptions>/ignore:4217,4049 %(AdditionalOptions)</AdditionalOptions>
     </Link>
     <PreBuildEvent>
-      <Command>cmake -S "$(ProjectDir)cmake\speexdsp" -B "$(ProjectDir)build\speexdsp" -G "Visual Studio 17 2022" -A $(Platform)
-cmake --build "$(ProjectDir)build\speexdsp" --config $(Configuration)</Command>
+      <Command>cmake -S "$(ProjectDir)cmake\speexdsp" -B "$(ProjectDir)build\speexdsp" -G "Visual Studio 18 2026" -A $(Platform)
+cmake --build "$(ProjectDir)build\speexdsp" --config $(Configuration)
+  cmake -S "$(ProjectDir)cmake\rnnoise" -B "$(ProjectDir)build\rnnoise" -G "Visual Studio 18 2026" -A $(Platform)
+  cmake --build "$(ProjectDir)build\rnnoise" --config $(Configuration)</Command>
     </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
@@ -279,3 +295,9 @@ cmake --build "$(ProjectDir)build\speexdsp" --config $(Configuration)</Command>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>
+
+
+
+
+
+

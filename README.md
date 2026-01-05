@@ -2,14 +2,19 @@
 
 I kicked off this project because I wanted hands-free gaming and chat without living in my earphones.
 
-Aec3Apo is a Windows Audio Processing Object (APO) for capture endpoints (microphones). It applies acoustic echo cancellation and noise suppression using SpeexDSP. The APO outputs mono audio.
+Aec3Apo is a Windows Audio Processing Object (APO) for capture endpoints (microphones). It applies acoustic echo cancellation using SpeexDSP and noise suppression using RNNoise. The APO outputs mono audio.
 
 Prereqs
-- Visual Studio 2022 + Windows Driver Kit (WDK)
+- Visual Studio 2026 (v18) for most development.
+- Visual Studio 2022 (v17) is still required for the driver/WDK build path.
+- Windows Driver Kit (WDK)
 - CMake 3.20+ (for third-party builds)
 
 Submodules
 - `git submodule update --init --recursive`
+
+RNNoise model
+- `rnnoise_model\\rnnoise_data.c` and `rnnoise_model\\rnnoise_data.h` must exist (built into rnnoise.lib).
 
 Build (x64)
 - Open `AecApo.sln` (or `AecApo.vcxproj`) and build `Release|x64`.
@@ -22,5 +27,5 @@ Install (testing)
 
 Notes
 - The APO registers as an Effect Pack targeting capture endpoints (microphones).
-- SpeexDSP handles all supported rates (including 8/44.1 kHz).
+- SpeexDSP handles AEC; RNNoise denoising runs at 48 kHz with resampling when needed.
 - Output is mono; input supports up to 16 channels.

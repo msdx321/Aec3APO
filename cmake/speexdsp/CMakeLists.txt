@@ -41,3 +41,10 @@ target_compile_definitions(speexdsp
         FLOATING_POINT
         USE_KISS_FFT
         EXPORT=)
+
+if (CMAKE_GENERATOR_PLATFORM MATCHES "Win32|x64")
+    target_compile_definitions(speexdsp
+        PRIVATE
+            USE_SSE
+            USE_SSE2)
+endif ()

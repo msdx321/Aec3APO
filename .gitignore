@@ -49,3 +49,6 @@ installer/*.pfx
 # Third-party builds
 third_party/aec3/build/
 third_party/speexdsp/build/
+
+# RNNoise model artifacts
+rnnoise_model/*.tar.gz

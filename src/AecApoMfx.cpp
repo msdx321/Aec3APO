@@ -27,11 +27,9 @@
 #include "SampleConverter.h"
 #include <devicetopology.h>
 
-#pragma warning(push)
-#pragma warning(disable : 4244)
 #include "speex/speex_echo.h"
-#include "speex/speex_preprocess.h"
-#pragma warning(pop)
+#include "speex/speex_resampler.h"
+#include "rnnoise.h"
 
 CAecApoMFX::~CAecApoMFX()
 {
@@ -48,6 +46,11 @@ namespace
     // Speex configuration constants
     constexpr int kFilterTailMultiplier = 10;  // 100ms tail (10 * 10ms frames)
     constexpr int kFrameDurationDivisor = 100; // 10ms frames (sampleRate / 100)
+    constexpr int kRnnoiseSampleRateHz = 48000;
+    constexpr float kRnnoiseVadThreshold = 0.6f;
+    constexpr int kRnnoiseVadGraceMs = 200;
+    constexpr float kRnnoisePcmScale = 32768.0f;
+    constexpr float kRnnoisePcmInvScale = 1.0f / 32768.0f;
 
     static bool IsSupportedAecSampleRate(float rate_hz)
     {
@@ -273,53 +276,142 @@ const AVRT_DATA CRegAPOProperties<1> CAecApoMFX::sm_RegProperties(
 //-------------------------------------------------------------------------
 
 //
-// ProcessSpeexFrame - Process one frame through Speex AEC
+// ProcessSpeexFrame - Process one frame through Speex AEC (in-place)
 //
-void CAecApoMFX::ProcessSpeexFrame()
+void CAecApoMFX::ProcessSpeexFrame(std::vector<float> &captureFrameScratch, size_t frameSize)
 {
-    const size_t frameSize = m_frameSize;
-    std::vector<float> &captureFrameScratch = m_captureFrameScratch;
+    if (!m_speexState)
+    {
+        return;
+    }
+
     std::vector<float> &renderFrameScratch = m_speexRenderFrameScratch;
     std::vector<int16_t> &speexMic16 = m_speexMic16;
     std::vector<int16_t> &speexRef16 = m_speexRef16;
     std::vector<int16_t> &speexOut16 = m_speexOut16;
 
-    // Process full 10 ms blocks through Speex AEC
-    while (m_captureFifo.Count() >= frameSize)
+    size_t got = 0;
     {
-        m_captureFifo.Pop(captureFrameScratch.data(), frameSize);
+        CComCritSecLock<CComAutoCriticalSection> lock(m_speexLock);
+        got = m_speexRenderFifo.Pop(renderFrameScratch.data(), frameSize);
+    }
+    if (got < frameSize)
+    {
+        std::fill(renderFrameScratch.begin() + got,
+                  renderFrameScratch.end(),
+                  0.0f);
+    }
 
-        size_t got = 0;
+    for (size_t i = 0; i < frameSize; ++i)
+    {
+        speexMic16[i] = ConverterTraits<int16_t>::FromFloat(captureFrameScratch[i]);
+        speexRef16[i] = ConverterTraits<int16_t>::FromFloat(renderFrameScratch[i]);
+    }
+    speex_echo_cancellation(m_speexState.get(),
+                            speexMic16.data(),
+                            speexRef16.data(),
+                            speexOut16.data());
+    for (size_t i = 0; i < frameSize; ++i)
+    {
+        captureFrameScratch[i] = ConverterTraits<int16_t>::ToFloat(speexOut16[i]);
+    }
+}
+
+void CAecApoMFX::ProcessRnnoiseFrame(std::vector<float> &captureFrameScratch, size_t frameSize)
+{
+    if (!m_rnnoiseState || m_rnnoiseFrameSize <= 0)
+    {
+        return;
+    }
+
+    if (m_rnnoiseInputScratch.size() < static_cast<size_t>(m_rnnoiseFrameSize))
+    {
+        m_rnnoiseInputScratch.resize(m_rnnoiseFrameSize);
+    }
+    if (m_rnnoiseOutputScratch.size() < static_cast<size_t>(m_rnnoiseFrameSize))
+    {
+        m_rnnoiseOutputScratch.resize(m_rnnoiseFrameSize);
+    }
+
+    bool rnnoiseReady = false;
+    if (m_rnnoiseResamplerIn && m_rnnoiseResamplerOut)
+    {
+        spx_uint32_t inLen = static_cast<spx_uint32_t>(frameSize);
+        spx_uint32_t outLen = static_cast<spx_uint32_t>(m_rnnoiseFrameSize);
+        speex_resampler_process_float(m_rnnoiseResamplerIn.get(),
+                                      0,
+                                      captureFrameScratch.data(),
+                                      &inLen,
+                                      m_rnnoiseInputScratch.data(),
+                                      &outLen);
+        if (outLen < static_cast<spx_uint32_t>(m_rnnoiseFrameSize))
         {
-            CComCritSecLock<CComAutoCriticalSection> lock(m_speexLock);
-            got = m_speexRenderFifo.Pop(renderFrameScratch.data(), frameSize);
+            std::fill(m_rnnoiseInputScratch.begin() + outLen, m_rnnoiseInputScratch.end(), 0.0f);
         }
-        if (got < frameSize)
+        rnnoiseReady = true;
+    }
+    else if (frameSize == static_cast<size_t>(m_rnnoiseFrameSize))
+    {
+        std::copy(captureFrameScratch.begin(),
+                  captureFrameScratch.begin() + frameSize,
+                  m_rnnoiseInputScratch.begin());
+        rnnoiseReady = true;
+    }
+
+    if (rnnoiseReady)
+    {
+        for (int i = 0; i < m_rnnoiseFrameSize; ++i)
         {
-            std::fill(renderFrameScratch.begin() + got,
-                      renderFrameScratch.end(),
+            m_rnnoiseInputScratch[i] *= kRnnoisePcmScale;
+        }
+        float vad = rnnoise_process_frame(m_rnnoiseState.get(),
+                                          m_rnnoiseOutputScratch.data(),
+                                          m_rnnoiseInputScratch.data());
+        if (vad >= kRnnoiseVadThreshold)
+        {
+            m_rnnoiseVadGraceSamplesRemaining = (kRnnoiseSampleRateHz * kRnnoiseVadGraceMs) / 1000;
+        }
+        else if (m_rnnoiseVadGraceSamplesRemaining > 0)
+        {
+            m_rnnoiseVadGraceSamplesRemaining -= m_rnnoiseFrameSize;
+            if (m_rnnoiseVadGraceSamplesRemaining < 0)
+            {
+                m_rnnoiseVadGraceSamplesRemaining = 0;
+            }
+        }
+        else
+        {
+            std::fill(m_rnnoiseOutputScratch.begin(),
+                      m_rnnoiseOutputScratch.begin() + m_rnnoiseFrameSize,
                       0.0f);
         }
 
-        for (size_t i = 0; i < frameSize; ++i)
+        for (int i = 0; i < m_rnnoiseFrameSize; ++i)
         {
-            speexMic16[i] = ConverterTraits<int16_t>::FromFloat(captureFrameScratch[i]);
-            speexRef16[i] = ConverterTraits<int16_t>::FromFloat(renderFrameScratch[i]);
+            m_rnnoiseOutputScratch[i] *= kRnnoisePcmInvScale;
         }
-        speex_echo_cancellation(m_speexState.get(),
-                                speexMic16.data(),
-                                speexRef16.data(),
-                                speexOut16.data());
-        if (m_speexPreprocess)
-        {
-            speex_preprocess_run(m_speexPreprocess.get(), speexOut16.data());
-        }
-        for (size_t i = 0; i < frameSize; ++i)
-        {
-            captureFrameScratch[i] = ConverterTraits<int16_t>::ToFloat(speexOut16[i]);
-        }
+    }
 
-        m_outputFifo.Push(captureFrameScratch.data(), frameSize);
+    if (rnnoiseReady && m_rnnoiseResamplerIn && m_rnnoiseResamplerOut)
+    {
+        spx_uint32_t inLen = static_cast<spx_uint32_t>(m_rnnoiseFrameSize);
+        spx_uint32_t outLen = static_cast<spx_uint32_t>(frameSize);
+        speex_resampler_process_float(m_rnnoiseResamplerOut.get(),
+                                      0,
+                                      m_rnnoiseOutputScratch.data(),
+                                      &inLen,
+                                      captureFrameScratch.data(),
+                                      &outLen);
+        if (outLen < static_cast<spx_uint32_t>(frameSize))
+        {
+            std::fill(captureFrameScratch.begin() + outLen, captureFrameScratch.end(), 0.0f);
+        }
+    }
+    else if (rnnoiseReady)
+    {
+        std::copy(m_rnnoiseOutputScratch.begin(),
+                  m_rnnoiseOutputScratch.begin() + frameSize,
+                  captureFrameScratch.begin());
     }
 }
 
@@ -383,12 +475,11 @@ void CAecApoMFX::InitializeProcessingBuffers()
 }
 
 //
-// InitializeSpeexProcessors - Initialize Speex echo cancellation and preprocessing
+// InitializeSpeexProcessors - Initialize Speex echo cancellation
 //
 void CAecApoMFX::InitializeSpeexProcessors()
 {
     // Reset Speex states (RAII unique_ptr handles destruction)
-    m_speexPreprocess.reset();
     m_speexState.reset();
 
     m_speexFrameSize = static_cast<int>(m_frameSize);
@@ -399,17 +490,40 @@ void CAecApoMFX::InitializeSpeexProcessors()
         if (m_speexState)
         {
             speex_echo_ctl(m_speexState.get(), SPEEX_ECHO_SET_SAMPLING_RATE, &m_sampleRateHz);
-            m_speexPreprocess.reset(speex_preprocess_state_init(m_speexFrameSize, m_sampleRateHz));
-            if (m_speexPreprocess)
-            {
-                speex_preprocess_ctl(m_speexPreprocess.get(), SPEEX_PREPROCESS_SET_ECHO_STATE, m_speexState.get());
-                int denoise = 1;
-                speex_preprocess_ctl(m_speexPreprocess.get(), SPEEX_PREPROCESS_SET_DENOISE, &denoise);
-            }
             m_speexMic16.assign(m_frameSize, 0);
             m_speexRef16.assign(m_frameSize, 0);
             m_speexOut16.assign(m_frameSize, 0);
             m_speexRenderFrameScratch.assign(m_frameSize, 0.0f);
+        }
+    }
+}
+
+//
+// InitializeRnnoiseProcessors - Initialize RNNoise denoising and resamplers
+//
+void CAecApoMFX::InitializeRnnoiseProcessors()
+{
+    m_rnnoiseState.reset();
+    m_rnnoiseResamplerIn.reset();
+    m_rnnoiseResamplerOut.reset();
+    m_rnnoiseFrameSize = 0;
+    m_rnnoiseVadGraceSamplesRemaining = 0;
+
+    m_rnnoiseFrameSize = rnnoise_get_frame_size();
+    if (m_rnnoiseFrameSize > 0)
+    {
+        m_rnnoiseState.reset(rnnoise_create(nullptr));
+        m_rnnoiseInputScratch.assign(m_rnnoiseFrameSize, 0.0f);
+        m_rnnoiseOutputScratch.assign(m_rnnoiseFrameSize, 0.0f);
+        m_rnnoiseVadGraceSamplesRemaining = (kRnnoiseSampleRateHz * kRnnoiseVadGraceMs) / 1000;
+
+        if (m_sampleRateHz != kRnnoiseSampleRateHz)
+        {
+            int err = 0;
+            m_rnnoiseResamplerIn.reset(speex_resampler_init(
+                1, m_sampleRateHz, kRnnoiseSampleRateHz, SPEEX_RESAMPLER_QUALITY_DEFAULT, &err));
+            m_rnnoiseResamplerOut.reset(speex_resampler_init(
+                1, kRnnoiseSampleRateHz, m_sampleRateHz, SPEEX_RESAMPLER_QUALITY_DEFAULT, &err));
         }
     }
 }
@@ -522,8 +636,14 @@ CAecApoMFX::APOProcess(
                 m_captureFrameScratch.resize(m_frameSize);
             }
 
-            // Process full 10 ms blocks through Speex AEC
-            ProcessSpeexFrame();
+            // Process full 10 ms blocks through AEC then RNNoise
+            while (m_captureFifo.Count() >= m_frameSize)
+            {
+                m_captureFifo.Pop(m_captureFrameScratch.data(), m_frameSize);
+                ProcessSpeexFrame(m_captureFrameScratch, m_frameSize);
+                ProcessRnnoiseFrame(m_captureFrameScratch, m_frameSize);
+                m_outputFifo.Push(m_captureFrameScratch.data(), m_frameSize);
+            }
 
             // Emit processed samples; if not enough yet, fall back to input.
             if (m_outputScratch.size() < frames)
@@ -618,8 +738,9 @@ STDMETHODIMP CAecApoMFX::LockForProcess(UINT32 u32NumInputConnections,
     // Initialize FIFOs and pre-allocate buffers
     InitializeProcessingBuffers();
 
-    // Initialize Speex processors
+    // Initialize processors
     InitializeSpeexProcessors();
+    InitializeRnnoiseProcessors();
 
     hr = CBaseAudioProcessingObject::LockForProcess(u32NumInputConnections,
                                                     ppInputConnections, u32NumOutputConnections, ppOutputConnections);

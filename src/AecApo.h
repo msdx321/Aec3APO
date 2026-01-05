@@ -34,11 +34,13 @@ _Analysis_mode_(_Analysis_code_type_user_driver_)
     };
 
 typedef struct SpeexEchoState_ SpeexEchoState;
-typedef struct SpeexPreprocessState_ SpeexPreprocessState;
+typedef struct SpeexResamplerState_ SpeexResamplerState;
+typedef struct DenoiseState DenoiseState;
 
-// Forward declare Speex destroy functions
+// Forward declare Speex and RNNoise destroy functions
 extern "C" void speex_echo_state_destroy(SpeexEchoState *st);
-extern "C" void speex_preprocess_state_destroy(SpeexPreprocessState *st);
+extern "C" void speex_resampler_destroy(SpeexResamplerState *st);
+extern "C" void rnnoise_destroy(DenoiseState *st);
 
 // RAII wrappers for Speex resources using unique_ptr with custom deleters
 namespace SpeexRAII
@@ -52,17 +54,35 @@ namespace SpeexRAII
         }
     };
 
-    struct PreprocessStateDeleter
+    using EchoStatePtr = std::unique_ptr<SpeexEchoState, EchoStateDeleter>;
+}
+
+namespace SpeexResamplerRAII
+{
+    struct ResamplerStateDeleter
     {
-        void operator()(SpeexPreprocessState *state) const
+        void operator()(SpeexResamplerState *state) const
         {
             if (state)
-                speex_preprocess_state_destroy(state);
+                speex_resampler_destroy(state);
         }
     };
 
-    using EchoStatePtr = std::unique_ptr<SpeexEchoState, EchoStateDeleter>;
-    using PreprocessStatePtr = std::unique_ptr<SpeexPreprocessState, PreprocessStateDeleter>;
+    using ResamplerStatePtr = std::unique_ptr<SpeexResamplerState, ResamplerStateDeleter>;
+}
+
+namespace RnnoiseRAII
+{
+    struct DenoiseStateDeleter
+    {
+        void operator()(DenoiseState *state) const
+        {
+            if (state)
+                rnnoise_destroy(state);
+        }
+    };
+
+    using DenoiseStatePtr = std::unique_ptr<DenoiseState, DenoiseStateDeleter>;
 }
 
 #pragma AVRT_VTABLES_BEGIN
@@ -175,9 +195,11 @@ private:
         APO_CONNECTION_DESCRIPTOR **ppOutputConnections);
     void InitializeProcessingBuffers();
     void InitializeSpeexProcessors();
+    void InitializeRnnoiseProcessors();
 
     // Helper method for APOProcess
-    void ProcessSpeexFrame();
+    void ProcessSpeexFrame(std::vector<float> &captureFrameScratch, size_t frameSize);
+    void ProcessRnnoiseFrame(std::vector<float> &captureFrameScratch, size_t frameSize);
 
     CComPtr<IAudioProcessingObjectLoggingService> m_apoLoggingService;
     CComAutoCriticalSection m_speexLock;
@@ -190,11 +212,18 @@ private:
     std::vector<float> m_captureFrameScratch;
     std::vector<float> m_outputScratch;
     SpeexRAII::EchoStatePtr m_speexState;
-    SpeexRAII::PreprocessStatePtr m_speexPreprocess;
     int m_speexFrameSize = 0;
     std::vector<int16_t> m_speexMic16;
     std::vector<int16_t> m_speexRef16;
     std::vector<int16_t> m_speexOut16;
+
+    RnnoiseRAII::DenoiseStatePtr m_rnnoiseState;
+    SpeexResamplerRAII::ResamplerStatePtr m_rnnoiseResamplerIn;
+    SpeexResamplerRAII::ResamplerStatePtr m_rnnoiseResamplerOut;
+    int m_rnnoiseFrameSize = 0;
+    int m_rnnoiseVadGraceSamplesRemaining = 0;
+    std::vector<float> m_rnnoiseInputScratch;
+    std::vector<float> m_rnnoiseOutputScratch;
 };
 #pragma AVRT_VTABLES_END
 
