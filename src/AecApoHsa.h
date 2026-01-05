@@ -14,22 +14,21 @@
 _Analysis_mode_(_Analysis_code_type_user_driver_)
 
 #pragma AVRT_VTABLES_BEGIN
-class CAecApoHsa :
-    public CComObjectRootEx<CComMultiThreadModel>,
-    public CComCoClass<CAecApoHsa, &CLSID_Aec3ApoHsa>,
-    public IAudioSystemEffectsPropertyStore
+    class CAecApoHsa : public CComObjectRootEx<CComMultiThreadModel>,
+                       public CComCoClass<CAecApoHsa, &CLSID_Aec3ApoHsa>,
+                       public IAudioSystemEffectsPropertyStore
 {
 public:
     CAecApoHsa() = default;
 
     DECLARE_NO_REGISTRY()
 
-BEGIN_COM_MAP(CAecApoHsa)
+    BEGIN_COM_MAP(CAecApoHsa)
     COM_INTERFACE_ENTRY(IAudioSystemEffectsPropertyStore)
-END_COM_MAP()
+    END_COM_MAP()
 
     // IAudioSystemEffectsPropertyStore
-    STDMETHOD(OpenDefaultPropertyStore)(DWORD /* stgmAccess */, IPropertyStore** propStore) override
+    STDMETHOD(OpenDefaultPropertyStore)(DWORD /* stgmAccess */, IPropertyStore **propStore) override
     {
         if (propStore == nullptr)
         {
@@ -39,12 +38,12 @@ END_COM_MAP()
         return PSCreateMemoryPropertyStore(IID_PPV_ARGS(propStore));
     }
 
-    STDMETHOD(OpenUserPropertyStore)(DWORD /* stgmAccess */, IPropertyStore** propStore) override
+    STDMETHOD(OpenUserPropertyStore)(DWORD /* stgmAccess */, IPropertyStore **propStore) override
     {
         return OpenDefaultPropertyStore(STGM_READ, propStore);
     }
 
-    STDMETHOD(OpenVolatilePropertyStore)(DWORD /* stgmAccess */, IPropertyStore** propStore) override
+    STDMETHOD(OpenVolatilePropertyStore)(DWORD /* stgmAccess */, IPropertyStore **propStore) override
     {
         return OpenDefaultPropertyStore(STGM_READWRITE, propStore);
     }
@@ -60,13 +59,13 @@ END_COM_MAP()
     }
 
     STDMETHOD(RegisterPropertyChangeNotification)(
-        IAudioSystemEffectsPropertyChangeNotificationClient* /* callback */) override
+        IAudioSystemEffectsPropertyChangeNotificationClient * /* callback */) override
     {
         return S_OK;
     }
 
     STDMETHOD(UnregisterPropertyChangeNotification)(
-        IAudioSystemEffectsPropertyChangeNotificationClient* /* callback */) override
+        IAudioSystemEffectsPropertyChangeNotificationClient * /* callback */) override
     {
         return S_OK;
     }
@@ -74,4 +73,3 @@ END_COM_MAP()
 #pragma AVRT_VTABLES_END
 
 OBJECT_ENTRY_AUTO(__uuidof(Aec3ApoHsa), CAecApoHsa)
-

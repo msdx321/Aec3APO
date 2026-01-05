@@ -21,28 +21,24 @@
 
 #include <AecApoDll_i.c>
 
-
 //-------------------------------------------------------------------------
 // Array of APO_REG_PROPERTIES structures implemented in this module.
 // Each new APO implementation will be added to this array.
 //
 APO_REG_PROPERTIES const *gCoreAPOs[] =
-{
-    &CAecApoMFX::sm_RegProperties.m_Properties
-};
+    {
+        &CAecApoMFX::sm_RegProperties.m_Properties};
 
 // {secret}
-class CAecApoDllModule : public CAtlDllModuleT< CAecApoDllModule >
+class CAecApoDllModule : public CAtlDllModuleT<CAecApoDllModule>
 {
-public :
+public:
     DECLARE_LIBID(LIBID_AecApoDlllib)
     DECLARE_REGISTRY_APPID_RESOURCEID(IDR_AECAPODLL, "{9270B9A3-1F7B-441F-B533-21E8BF83D4A3}")
-
 };
 
 // {secret}
 CAecApoDllModule _AtlModule;
-
 
 // {secret}
 extern "C" BOOL WINAPI DllMain(HINSTANCE /* hInstance */, DWORD dwReason, LPVOID lpReserved)
@@ -51,13 +47,12 @@ extern "C" BOOL WINAPI DllMain(HINSTANCE /* hInstance */, DWORD dwReason, LPVOID
     {
     }
     // do necessary cleanup only if the DLL is being unloaded dynamically
-    else if ((DLL_PROCESS_DETACH == dwReason) && (NULL == lpReserved))
+    else if ((DLL_PROCESS_DETACH == dwReason) && (lpReserved == nullptr))
     {
     }
 
     return _AtlModule.DllMain(dwReason, lpReserved);
 }
-
 
 // {secret}
 STDAPI DllCanUnloadNow(void)
@@ -65,9 +60,8 @@ STDAPI DllCanUnloadNow(void)
     return _AtlModule.DllCanUnloadNow();
 }
 
-
 // {secret}
-STDAPI DllGetClassObject(_In_ REFCLSID rclsid, _In_ REFIID riid, _Outptr_ LPVOID FAR* ppv)
+STDAPI DllGetClassObject(_In_ REFCLSID rclsid, _In_ REFIID riid, _Outptr_ LPVOID FAR *ppv)
 {
     return _AtlModule.DllGetClassObject(rclsid, riid, ppv);
 }
