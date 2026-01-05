@@ -202,7 +202,7 @@ private:
     void ProcessRnnoiseFrame(std::vector<float> &captureFrameScratch, size_t frameSize);
 
     CComPtr<IAudioProcessingObjectLoggingService> m_apoLoggingService;
-    CComAutoCriticalSection m_speexLock;
+    // Lock removed - using lock-free FIFO
     SampleFifo m_speexRenderFifo;
     SampleFifo m_captureFifo;
     SampleFifo m_outputFifo;

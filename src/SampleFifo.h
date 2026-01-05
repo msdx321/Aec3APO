@@ -3,39 +3,55 @@
 //
 // Description:
 //
-//  Circular buffer (FIFO) for audio samples with thread-safe operations
+//  Lock-free circular buffer (FIFO) for audio samples
+//  Optimized for Single-Producer-Single-Consumer (SPSC) pattern
 //
 
 #pragma once
 
 #include <vector>
 #include <algorithm>
+#include <atomic>
 
 //
-// SampleFifo - A circular buffer for floating-point audio samples
+// SampleFifo - Lock-free circular buffer for floating-point audio samples
 //
-// This FIFO provides:
+// Features:
 // - Fixed capacity circular buffering
+// - Lock-free thread-safe operations (SPSC pattern)
 // - Automatic overflow handling (drops oldest samples when full)
-// - Efficient modulo-based indexing
+// - Batch copy operations for improved performance
+// - Proper memory ordering for x64 and ARM64
 //
+// Thread Safety:
+// - Producer thread: Calls Push() only
+// - Consumer thread: Calls Pop() only
+// - Init() and Reset() must be called when no concurrent access is happening
+//
+#pragma warning(push)
+#pragma warning(disable : 4324) // structure was padded due to alignment specifier
 struct SampleFifo
 {
     std::vector<float> buffer;
-    size_t read = 0;
-    size_t write = 0;
-    size_t count = 0;
+
+    // Cache-line aligned atomics to prevent false sharing
+    alignas(64) std::atomic<size_t> read{0};
+    alignas(64) std::atomic<size_t> write{0};
+    alignas(64) std::atomic<size_t> count{0};
+
+    size_t capacity = 0;
 
     // Default constructor
     SampleFifo() = default;
 
     // Move constructor
     SampleFifo(SampleFifo &&other) noexcept
-        : buffer(std::move(other.buffer)), read(other.read), write(other.write), count(other.count)
+        : buffer(std::move(other.buffer)), read(other.read.load(std::memory_order_relaxed)), write(other.write.load(std::memory_order_relaxed)), count(other.count.load(std::memory_order_relaxed)), capacity(other.capacity)
     {
-        other.read = 0;
-        other.write = 0;
-        other.count = 0;
+        other.read.store(0, std::memory_order_relaxed);
+        other.write.store(0, std::memory_order_relaxed);
+        other.count.store(0, std::memory_order_relaxed);
+        other.capacity = 0;
     }
 
     // Move assignment operator
@@ -44,110 +60,116 @@ struct SampleFifo
         if (this != &other)
         {
             buffer = std::move(other.buffer);
-            read = other.read;
-            write = other.write;
-            count = other.count;
+            read.store(other.read.load(std::memory_order_relaxed), std::memory_order_relaxed);
+            write.store(other.write.load(std::memory_order_relaxed), std::memory_order_relaxed);
+            count.store(other.count.load(std::memory_order_relaxed), std::memory_order_relaxed);
+            capacity = other.capacity;
 
-            other.read = 0;
-            other.write = 0;
-            other.count = 0;
+            other.read.store(0, std::memory_order_relaxed);
+            other.write.store(0, std::memory_order_relaxed);
+            other.count.store(0, std::memory_order_relaxed);
+            other.capacity = 0;
         }
         return *this;
     }
 
-    // Delete copy operations (use move semantics instead)
+    // Delete copy operations
     SampleFifo(const SampleFifo &) = delete;
     SampleFifo &operator=(const SampleFifo &) = delete;
 
-    //
-    // Initialize the FIFO with specified capacity
-    //
-    void Init(size_t capacity)
+    void Init(size_t cap)
     {
-        buffer.assign(capacity, 0.0f);
-        read = 0;
-        write = 0;
-        count = 0;
+        buffer.assign(cap, 0.0f);
+        capacity = cap;
+        read.store(0, std::memory_order_relaxed);
+        write.store(0, std::memory_order_relaxed);
+        count.store(0, std::memory_order_relaxed);
     }
 
-    //
-    // Reset the FIFO without deallocating memory
-    //
     void Reset()
     {
-        read = 0;
-        write = 0;
-        count = 0;
+        read.store(0, std::memory_order_relaxed);
+        write.store(0, std::memory_order_relaxed);
+        count.store(0, std::memory_order_relaxed);
     }
 
-    //
-    // Get the maximum capacity of the FIFO
-    //
-    size_t Capacity() const { return buffer.size(); }
+    size_t Capacity() const { return capacity; }
 
-    //
-    // Get the current number of samples in the FIFO
-    //
-    size_t Count() const { return count; }
+    size_t Count() const
+    {
+        return count.load(std::memory_order_acquire);
+    }
 
-    //
-    // Push samples into the FIFO
-    // If FIFO is full, oldest samples are dropped
-    //
+    // Producer only
     void Push(const float *data, size_t samples)
     {
-        if (buffer.empty() || samples == 0)
+        if (capacity == 0 || samples == 0)
         {
             return;
         }
 
-        const size_t capacity = buffer.size();
-
-        // If input has more samples than capacity, only keep the most recent
         if (samples > capacity)
         {
             data += (samples - capacity);
             samples = capacity;
         }
 
-        // Drop oldest samples if not enough room
-        if (samples > capacity - count)
+        size_t currentWrite = write.load(std::memory_order_relaxed);
+        size_t currentCount = count.load(std::memory_order_acquire);
+
+        if (samples > capacity - currentCount)
         {
-            size_t drop = samples - (capacity - count);
-            read = (read + drop) % capacity;
-            count -= drop;
+            size_t drop = samples - (capacity - currentCount);
+            currentCount -= drop;
         }
 
-        // Write samples to buffer
-        for (size_t i = 0; i < samples; ++i)
+        // Batch copy with wrap-around handling
+        size_t firstChunk = (std::min)(samples, capacity - currentWrite);
+        std::copy_n(data, firstChunk, &buffer[currentWrite]);
+
+        if (samples > firstChunk)
         {
-            buffer[write] = data[i];
-            write = (write + 1) % capacity;
+            size_t secondChunk = samples - firstChunk;
+            std::copy_n(data + firstChunk, secondChunk, &buffer[0]);
         }
-        count += samples;
+
+        size_t newWrite = (currentWrite + samples) % capacity;
+        write.store(newWrite, std::memory_order_release);
+        count.fetch_add(samples, std::memory_order_acq_rel);
     }
 
-    //
-    // Pop samples from the FIFO
-    // Returns the actual number of samples read (may be less than requested)
-    //
+    // Consumer only
     size_t Pop(float *out, size_t samples)
     {
-        if (buffer.empty() || samples == 0)
+        if (capacity == 0 || samples == 0)
         {
             return 0;
         }
 
-        size_t to_read = (samples < count) ? samples : count;
-        const size_t capacity = buffer.size();
+        size_t currentRead = read.load(std::memory_order_relaxed);
+        size_t available = count.load(std::memory_order_acquire);
 
-        // Read samples from buffer
-        for (size_t i = 0; i < to_read; ++i)
+        size_t toRead = (std::min)(samples, available);
+        if (toRead == 0)
         {
-            out[i] = buffer[read];
-            read = (read + 1) % capacity;
+            return 0;
         }
-        count -= to_read;
-        return to_read;
+
+        // Batch copy with wrap-around handling
+        size_t firstChunk = (std::min)(toRead, capacity - currentRead);
+        std::copy_n(&buffer[currentRead], firstChunk, out);
+
+        if (toRead > firstChunk)
+        {
+            size_t secondChunk = toRead - firstChunk;
+            std::copy_n(&buffer[0], secondChunk, out + firstChunk);
+        }
+
+        size_t newRead = (currentRead + toRead) % capacity;
+        read.store(newRead, std::memory_order_release);
+        count.fetch_sub(toRead, std::memory_order_acq_rel);
+
+        return toRead;
     }
 };
+#pragma warning(pop)

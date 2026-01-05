@@ -54,30 +54,24 @@ namespace
 
     static bool IsSupportedAecSampleRate(float rate_hz)
     {
-        for (int rate : kSupportedSampleRatesHz)
-        {
-            if (std::fabs(rate_hz - static_cast<float>(rate)) < kSampleRateMatchToleranceHz)
-            {
-                return true;
-            }
-        }
-        return false;
+        return std::any_of(kSupportedSampleRatesHz.begin(), kSupportedSampleRatesHz.end(),
+                           [rate_hz](int rate)
+                           {
+                               return std::fabs(rate_hz - static_cast<float>(rate)) < kSampleRateMatchToleranceHz;
+                           });
     }
 
     static int GetClosestSupportedSampleRate(float rate_hz)
     {
-        float bestDiff = FLT_MAX;
-        int best = kDefaultSampleRateHz;
-        for (int rate : kSupportedSampleRatesHz)
-        {
-            float diff = std::fabs(rate_hz - static_cast<float>(rate));
-            if (diff < bestDiff)
-            {
-                bestDiff = diff;
-                best = rate;
-            }
-        }
-        return best;
+        auto closest = std::min_element(kSupportedSampleRatesHz.begin(), kSupportedSampleRatesHz.end(),
+                                        [rate_hz](int a, int b)
+                                        {
+                                            float diffA = std::fabs(rate_hz - static_cast<float>(a));
+                                            float diffB = std::fabs(rate_hz - static_cast<float>(b));
+                                            return diffA < diffB;
+                                        });
+
+        return closest != kSupportedSampleRatesHz.end() ? *closest : kDefaultSampleRateHz;
     }
 } // namespace
 
@@ -290,11 +284,8 @@ void CAecApoMFX::ProcessSpeexFrame(std::vector<float> &captureFrameScratch, size
     std::vector<int16_t> &speexRef16 = m_speexRef16;
     std::vector<int16_t> &speexOut16 = m_speexOut16;
 
-    size_t got = 0;
-    {
-        CComCritSecLock<CComAutoCriticalSection> lock(m_speexLock);
-        got = m_speexRenderFifo.Pop(renderFrameScratch.data(), frameSize);
-    }
+    // Lock-free FIFO - no critical section needed
+    size_t got = m_speexRenderFifo.Pop(renderFrameScratch.data(), frameSize);
     if (got < frameSize)
     {
         std::fill(renderFrameScratch.begin() + got,
@@ -302,19 +293,24 @@ void CAecApoMFX::ProcessSpeexFrame(std::vector<float> &captureFrameScratch, size
                   0.0f);
     }
 
-    for (size_t i = 0; i < frameSize; ++i)
-    {
-        speexMic16[i] = ConverterTraits<int16_t>::FromFloat(captureFrameScratch[i]);
-        speexRef16[i] = ConverterTraits<int16_t>::FromFloat(renderFrameScratch[i]);
-    }
+    // Vectorized float->int16 conversion
+    std::transform(captureFrameScratch.begin(), captureFrameScratch.begin() + frameSize,
+                   speexMic16.begin(),
+                   ConverterTraits<int16_t>::FromFloat);
+
+    std::transform(renderFrameScratch.begin(), renderFrameScratch.begin() + frameSize,
+                   speexRef16.begin(),
+                   ConverterTraits<int16_t>::FromFloat);
+
     speex_echo_cancellation(m_speexState.get(),
                             speexMic16.data(),
                             speexRef16.data(),
                             speexOut16.data());
-    for (size_t i = 0; i < frameSize; ++i)
-    {
-        captureFrameScratch[i] = ConverterTraits<int16_t>::ToFloat(speexOut16[i]);
-    }
+
+    // Vectorized int16->float conversion
+    std::transform(speexOut16.begin(), speexOut16.begin() + frameSize,
+                   captureFrameScratch.begin(),
+                   ConverterTraits<int16_t>::ToFloat);
 }
 
 void CAecApoMFX::ProcessRnnoiseFrame(std::vector<float> &captureFrameScratch, size_t frameSize)
@@ -360,10 +356,13 @@ void CAecApoMFX::ProcessRnnoiseFrame(std::vector<float> &captureFrameScratch, si
 
     if (rnnoiseReady)
     {
-        for (int i = 0; i < m_rnnoiseFrameSize; ++i)
-        {
-            m_rnnoiseInputScratch[i] *= kRnnoisePcmScale;
-        }
+        // Vectorized PCM scale up
+        std::transform(m_rnnoiseInputScratch.begin(),
+                       m_rnnoiseInputScratch.begin() + m_rnnoiseFrameSize,
+                       m_rnnoiseInputScratch.begin(),
+                       [](float v)
+                       { return v * kRnnoisePcmScale; });
+
         float vad = rnnoise_process_frame(m_rnnoiseState.get(),
                                           m_rnnoiseOutputScratch.data(),
                                           m_rnnoiseInputScratch.data());
@@ -386,10 +385,12 @@ void CAecApoMFX::ProcessRnnoiseFrame(std::vector<float> &captureFrameScratch, si
                       0.0f);
         }
 
-        for (int i = 0; i < m_rnnoiseFrameSize; ++i)
-        {
-            m_rnnoiseOutputScratch[i] *= kRnnoisePcmInvScale;
-        }
+        // Vectorized PCM scale down
+        std::transform(m_rnnoiseOutputScratch.begin(),
+                       m_rnnoiseOutputScratch.begin() + m_rnnoiseFrameSize,
+                       m_rnnoiseOutputScratch.begin(),
+                       [](float v)
+                       { return v * kRnnoisePcmInvScale; });
     }
 
     if (rnnoiseReady && m_rnnoiseResamplerIn && m_rnnoiseResamplerOut)
@@ -962,14 +963,16 @@ static HRESULT IsFormatSupportedForAec(
 
     HRESULT hr = S_OK;
     UNCOMPRESSEDAUDIOFORMAT format;
+    AecSampleFormat sampleFormat = AecSampleFormat::kUnknown;
+    bool formatValid = false;
 
     IF_TRUE_ACTION_JUMP((pMediaType == nullptr || pSupported == nullptr), hr = E_INVALIDARG, exit);
     hr = pMediaType->GetUncompressedAudioFormat(&format);
     IF_FAILED_JUMP(hr, exit);
 
-    AecSampleFormat sampleFormat = GetAecSampleFormat(format);
-    bool formatValid = sampleFormat != AecSampleFormat::kUnknown &&
-                       IsSupportedAecSampleRate(format.fFramesPerSecond);
+    sampleFormat = GetAecSampleFormat(format);
+    formatValid = sampleFormat != AecSampleFormat::kUnknown &&
+                  IsSupportedAecSampleRate(format.fFramesPerSecond);
 
     if (requireMono)
     {
@@ -1069,7 +1072,9 @@ CreatePreferredOutputMediaType(IAudioMediaType **ppMediaType,
 STDMETHODIMP CAecApoMFX::IsInputFormatSupported(IAudioMediaType *pOutputFormat, IAudioMediaType *pRequestedInputFormat, IAudioMediaType **ppSupportedInputFormat)
 {
     ASSERT_NONREALTIME();
-    HRESULT hResult;
+    HRESULT hResult = S_OK;
+    BOOL bSupportedOut = FALSE;
+    BOOL bSupported = FALSE;
 
     IF_TRUE_ACTION_JUMP((pRequestedInputFormat == nullptr) || (ppSupportedInputFormat == nullptr), hResult = E_POINTER, Exit);
     *ppSupportedInputFormat = nullptr;
@@ -1086,7 +1091,7 @@ STDMETHODIMP CAecApoMFX::IsInputFormatSupported(IAudioMediaType *pOutputFormat, 
     if (pOutputFormat)
     {
         // Is this a valid format that we support at the output?
-        BOOL bSupportedOut = FALSE;
+        bSupportedOut = FALSE;
         hResult = IsOutputFormatSupportedForAec(pOutputFormat, &bSupportedOut);
         IF_FAILED_JUMP(hResult, Exit);
         if (!bSupportedOut)
@@ -1095,7 +1100,7 @@ STDMETHODIMP CAecApoMFX::IsInputFormatSupported(IAudioMediaType *pOutputFormat, 
         }
     }
 
-    BOOL bSupported = FALSE;
+    bSupported = FALSE;
     hResult = IsInputFormatSupportedForAec(pRequestedInputFormat, &bSupported);
     IF_FAILED_JUMP(hResult, Exit);
 
@@ -1144,14 +1149,16 @@ Exit:
 STDMETHODIMP CAecApoMFX::IsOutputFormatSupported(IAudioMediaType *pInputFormat, IAudioMediaType *pRequestedOutputFormat, IAudioMediaType **ppSupportedOutputFormat)
 {
     ASSERT_NONREALTIME();
-    HRESULT hResult;
+    HRESULT hResult = S_OK;
+    BOOL bSupportedIn = FALSE;
+    BOOL bSupported = FALSE;
 
     IF_TRUE_ACTION_JUMP((pRequestedOutputFormat == nullptr) || (ppSupportedOutputFormat == nullptr), hResult = E_POINTER, Exit);
     *ppSupportedOutputFormat = nullptr;
 
     if (pInputFormat != nullptr)
     {
-        BOOL bSupportedIn = FALSE;
+        bSupportedIn = FALSE;
         hResult = IsInputFormatSupportedForAec(pInputFormat, &bSupportedIn);
         IF_FAILED_JUMP(hResult, Exit);
         if (!bSupportedIn)
@@ -1160,7 +1167,7 @@ STDMETHODIMP CAecApoMFX::IsOutputFormatSupported(IAudioMediaType *pInputFormat, 
         }
     }
 
-    BOOL bSupported = FALSE;
+    bSupported = FALSE;
     hResult = IsOutputFormatSupportedForAec(pRequestedOutputFormat, &bSupported);
     IF_FAILED_JUMP(hResult, Exit);
 
@@ -1198,13 +1205,14 @@ CAecApoMFX::AddAuxiliaryInput(
 {
     HRESULT hResult = S_OK;
     UNCOMPRESSEDAUDIOFORMAT renderFormat = {};
+    BOOL bSupported = FALSE;
 
     ASSERT_NONREALTIME();
 
     IF_TRUE_ACTION_JUMP(m_bIsLocked, hResult = APOERR_APO_LOCKED, Exit);
     IF_TRUE_ACTION_JUMP(!m_bIsInitialized, hResult = APOERR_NOT_INITIALIZED, Exit);
 
-    BOOL bSupported = FALSE;
+    bSupported = FALSE;
     hResult = IsInputFormatSupportedForAec(pInputConnection->pFormat, &bSupported);
     IF_FAILED_JUMP(hResult, Exit);
     IF_TRUE_ACTION_JUMP(!bSupported, hResult = APOERR_FORMAT_NOT_SUPPORTED, Exit);
@@ -1284,10 +1292,11 @@ CAecApoMFX::IsInputFormatSupported(IAudioMediaType *pRequestedInputFormat,
 {
     ASSERT_NONREALTIME();
     HRESULT hResult = S_OK;
+    BOOL bSupported = FALSE;
 
     IF_TRUE_ACTION_JUMP((pRequestedInputFormat == nullptr) || (ppSupportedInputFormat == nullptr), hResult = E_POINTER, Exit);
 
-    BOOL bSupported = FALSE;
+    bSupported = FALSE;
     hResult = IsInputFormatSupportedForAec(pRequestedInputFormat, &bSupported);
     IF_FAILED_JUMP(hResult, Exit);
 
@@ -1348,9 +1357,9 @@ CAecApoMFX::AcceptInput(DWORD dwInputId,
                        inputSilent,
                        m_renderScratch.data());
 
+    // Lock-free FIFO - no critical section needed
     if (m_speexState)
     {
-        CComCritSecLock<CComAutoCriticalSection> lock(m_speexLock);
         m_speexRenderFifo.Push(m_renderScratch.data(), frames);
     }
 }
