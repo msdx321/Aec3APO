@@ -522,9 +522,9 @@ void CAecApoMFX::InitializeRnnoiseProcessors()
         {
             int err = 0;
             m_rnnoiseResamplerIn.reset(speex_resampler_init(
-                1, m_sampleRateHz, kRnnoiseSampleRateHz, SPEEX_RESAMPLER_QUALITY_DEFAULT, &err));
+                1, m_sampleRateHz, kRnnoiseSampleRateHz, SPEEX_RESAMPLER_QUALITY_MAX, &err));
             m_rnnoiseResamplerOut.reset(speex_resampler_init(
-                1, kRnnoiseSampleRateHz, m_sampleRateHz, SPEEX_RESAMPLER_QUALITY_DEFAULT, &err));
+                1, kRnnoiseSampleRateHz, m_sampleRateHz, SPEEX_RESAMPLER_QUALITY_MAX, &err));
         }
     }
 }
