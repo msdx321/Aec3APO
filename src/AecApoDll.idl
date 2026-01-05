@@ -16,7 +16,7 @@ import "audioenginebaseapo.idl";
 //
 [
     uuid(E5B04365-A8F2-4542-8195-53E8EFC823B6),
-    version(1.0)
+    version(1.1)
 ]
 library AecApoDlllib
 {

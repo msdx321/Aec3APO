@@ -5,7 +5,7 @@ Signature   = "$WINDOWS NT$"
 Class       = AudioProcessingObject
 ClassGuid   = {5989fce8-9cd0-467d-8a6a-5419e31529d4}
 Provider    = %ProviderName%
-DriverVer   = 01/01/2026,1.0.0.0
+DriverVer   = 01/05/2026,1.1.0.0
 CatalogFile = aec3apo.cat
 PnpLockDown = 1
 
@@ -35,7 +35,7 @@ HKR,Classes\CLSID\%AEC_EFFECTPACK_FX_MODE_CLSID%\InProcServer32,ThreadingModel,,
 HKR,AudioEngine\AudioProcessingObjects\%AEC_EFFECTPACK_FX_MODE_CLSID%,"FriendlyName",,%APO_MFX_FriendlyName%
 HKR,AudioEngine\AudioProcessingObjects\%AEC_EFFECTPACK_FX_MODE_CLSID%,"Copyright",,%Copyright%
 HKR,AudioEngine\AudioProcessingObjects\%AEC_EFFECTPACK_FX_MODE_CLSID%,"MajorVersion",%REG_DWORD%,1
-HKR,AudioEngine\AudioProcessingObjects\%AEC_EFFECTPACK_FX_MODE_CLSID%,"MinorVersion",%REG_DWORD%,0
+HKR,AudioEngine\AudioProcessingObjects\%AEC_EFFECTPACK_FX_MODE_CLSID%,"MinorVersion",%REG_DWORD%,1
 HKR,AudioEngine\AudioProcessingObjects\%AEC_EFFECTPACK_FX_MODE_CLSID%,"Flags", %REG_DWORD%,%APO_FLAG_AEC%
 HKR,AudioEngine\AudioProcessingObjects\%AEC_EFFECTPACK_FX_MODE_CLSID%,"MinInputConnections",%REG_DWORD%,1
 HKR,AudioEngine\AudioProcessingObjects\%AEC_EFFECTPACK_FX_MODE_CLSID%,"MaxInputConnections",%REG_DWORD%,1
@@ -54,7 +54,7 @@ HKR,EffectPackRegistration\%EFFECT_CLSID%,%PKEY_ItemNameDisplay%, ,%Effect_Pack_
 HKR,EffectPackRegistration\%EFFECT_CLSID%,%PKEY_FX_Author%, ,%Effect_Pack_Author%
 HKR,EffectPackRegistration\%EFFECT_CLSID%,%PKEY_FX_MEP_UserInterfaceClsid%,%REG_SZ%,%HSA_COM_CLASS_CLSID%
 HKR,EffectPackRegistration\%EFFECT_CLSID%,%PKEY_FX_VersionMajor%, %REG_DWORD%, 1
-HKR,EffectPackRegistration\%EFFECT_CLSID%,%PKEY_FX_VersionMinor%, %REG_DWORD%, 0
+HKR,EffectPackRegistration\%EFFECT_CLSID%,%PKEY_FX_VersionMinor%, %REG_DWORD%, 1
 HKR,EffectPackRegistration\%EFFECT_CLSID%\FxProperties,%PKEY_FX_ApplyToCapture%, %REG_DWORD%, 1
 HKR,EffectPackRegistration\%EFFECT_CLSID%\FxProperties,%PKEY_FX_Enumerator%,%REG_MULTI_SZ%,"*"
 HKR,EffectPackRegistration\%EFFECT_CLSID%\FxProperties,%PKEY_FX_Association%,%REG_MULTI_SZ%,%KSNODETYPE_MICROPHONE%,%KSNODETYPE_DESKTOP_MICROPHONE%,%KSNODETYPE_PERSONAL_MICROPHONE%,%KSNODETYPE_OMNI_DIRECTIONAL_MICROPHONE%,%KSNODETYPE_MICROPHONE_ARRAY%,%KSNODETYPE_PROCESSING_MICROPHONE_ARRAY%,%KSNODETYPE_HEADSET%,%KSNODETYPE_HFP_SIDEBAND_HEADSET%,%KSNODETYPE_HEADSET_MICROPHONE%,%KSNODETYPE_ECHO_CANCELING_SPEAKERPHONE%,%KSNODETYPE_ECHO_SUPPRESSING_SPEAKERPHONE%,%KSNODETYPE_SPEAKERPHONE_NO_ECHO_REDUCTION%
@@ -69,7 +69,7 @@ HKR,EffectPackRegistration\%EFFECT_CLSID%\FxProperties,%PKEY_FX_ExcludeForHWIDs%
 HKR,Classes\CLSID\%HSA_COM_CLASS_CLSID%,,,%HSA_FriendlyName%
 HKR,Classes\CLSID\%HSA_COM_CLASS_CLSID%\InProcServer32,,%REG_EXPAND_SZ%,%13%\AecApo.dll
 HKR,Classes\CLSID\%HSA_COM_CLASS_CLSID%\InProcServer32,ThreadingModel,,"Both"
-HKR,Classes\CLSID\%HSA_COM_CLASS_CLSID%\Version,,,"1.0"
+HKR,Classes\CLSID\%HSA_COM_CLASS_CLSID%\Version,,,"1.1"
 
 [SourceDisksNames]
 1 = Disk

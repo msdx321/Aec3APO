@@ -262,7 +262,7 @@ const AVRT_DATA CRegAPOProperties<1> CAecApoMFX::sm_RegProperties(
     L"Aec3Apo",                                                                          // friendly name of this APO
     L"Copyright (c) msdx321",                                                            // copyright info
     1,                                                                                   // major version #
-    0,                                                                                   // minor version #
+    1,                                                                                   // minor version #
     __uuidof(IAudioProcessingObject),                                                    // iid of primary interface
     (APO_FLAG)(APO_FLAG_BITSPERSAMPLE_MUST_MATCH | APO_FLAG_FRAMESPERSECOND_MUST_MATCH), // kak check this
     DEFAULT_APOREG_MININPUTCONNECTIONS,
