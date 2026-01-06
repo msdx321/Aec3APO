@@ -24,6 +24,12 @@
 
 _Analysis_mode_(_Analysis_code_type_user_driver_)
 
+#ifndef AEC_USE_NKF
+#define AEC_USE_NKF 1
+#endif
+
+#include "nkf_aec/nkf_aec.h"
+
     enum class AecSampleFormat {
         kUnknown = 0,
         kFloat32,
@@ -196,10 +202,12 @@ private:
     void InitializeProcessingBuffers();
     void InitializeSpeexProcessors();
     void InitializeRnnoiseProcessors();
+    void InitializeNkfProcessors();
 
     // Helper method for APOProcess
     void ProcessSpeexFrame(std::vector<float> &captureFrameScratch, size_t frameSize);
     void ProcessRnnoiseFrame(std::vector<float> &captureFrameScratch, size_t frameSize);
+    void ProcessNkfFrame(std::vector<float> &captureFrameScratch, size_t frameSize);
 
     CComPtr<IAudioProcessingObjectLoggingService> m_apoLoggingService;
     // Lock removed - using lock-free FIFO
@@ -224,6 +232,26 @@ private:
     int m_rnnoiseVadGraceSamplesRemaining = 0;
     std::vector<float> m_rnnoiseInputScratch;
     std::vector<float> m_rnnoiseOutputScratch;
+
+    // NKF AEC placeholder (resampling + buffering only)
+    bool m_nkfReady = false;
+    int m_nkfSampleRateHz = 0;
+    size_t m_nkfHopSize = 0;
+    std::unique_ptr<nkf_aec::NkfAec> m_nkfAec;
+    SampleFifo m_nkfCaptureFifo;
+    SampleFifo m_nkfRenderFifo;
+    SampleFifo m_nkfOutputFifo;
+    SpeexResamplerRAII::ResamplerStatePtr m_nkfResamplerIn;
+    SpeexResamplerRAII::ResamplerStatePtr m_nkfResamplerOut;
+    SpeexResamplerRAII::ResamplerStatePtr m_nkfResamplerRenderIn;
+    std::vector<float> m_nkfCaptureResampleScratch;
+    std::vector<float> m_nkfRenderResampleScratch;
+    std::vector<float> m_nkfInputHopScratch;
+    std::vector<float> m_nkfRefHopScratch;
+    std::vector<float> m_nkfOutputHopScratch;
+    std::vector<float> m_nkfOutputResampleInScratch;
+    std::vector<float> m_nkfOutputResampleScratch;
+    std::vector<float> m_nkfBypassScratch;
 };
 #pragma AVRT_VTABLES_END
 

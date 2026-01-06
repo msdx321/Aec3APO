@@ -31,6 +31,30 @@
     <ClInclude Include="src\AecApoHsa.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="nkf_aec\include\nkf_aec\nkf_aec.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="nkf_aec\dsp\kiss_fft_wrapper.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="nkf_aec\math\activations.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="nkf_aec\math\matrix_helper.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="nkf_aec\math\simd_size.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="nkf_aec\nn\complex_gru.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="nkf_aec\nn\gru.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="nkf_aec\nn\kgnet.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="src\AecApo.png">
@@ -51,6 +75,27 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="src\AecApoMFX.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="nkf_aec\core\nkf_aec.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="nkf_aec\dsp\kiss_fft_wrapper.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="nkf_aec\math\activations.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="nkf_aec\math\matrix_helper.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="nkf_aec\nn\complex_gru.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="nkf_aec\nn\gru.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="nkf_aec\nn\kgnet.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

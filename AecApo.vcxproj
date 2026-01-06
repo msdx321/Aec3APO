@@ -77,7 +77,7 @@
       <TreatWarningAsError>true</TreatWarningAsError>
       <WarningLevel>Level4</WarningLevel>
       <PreprocessorDefinitions>%(PreprocessorDefinitions);_WINDLL;_USRDLL;UNICODE;_UNICODE;NOMINMAX</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);$(DDK_INC_PATH);include;src;.;$(IntDir);third_party\speexdsp\include;build\speexdsp\include;third_party\speexdsp\libspeexdsp;third_party\speexdsp\win32;third_party\rnnoise\include;third_party\rnnoise\src;rnnoise_model</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);$(DDK_INC_PATH);include;src;nkf_aec;nkf_aec\include;.;$(IntDir);third_party\speexdsp\include;build\speexdsp\include;third_party\speexdsp\libspeexdsp;third_party\speexdsp\win32;third_party\rnnoise\include;third_party\rnnoise\src;rnnoise_model</AdditionalIncludeDirectories>
       <ExceptionHandling>
       </ExceptionHandling>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
@@ -120,7 +120,7 @@ cmake --build "$(ProjectDir)build\speexdsp" --config $(Configuration)
       <TreatWarningAsError>true</TreatWarningAsError>
       <WarningLevel>Level4</WarningLevel>
       <PreprocessorDefinitions>%(PreprocessorDefinitions);_WINDLL;_USRDLL;UNICODE;_UNICODE;NOMINMAX</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);$(DDK_INC_PATH);include;src;.;$(IntDir);third_party\speexdsp\include;build\speexdsp\include;third_party\speexdsp\libspeexdsp;third_party\speexdsp\win32;third_party\rnnoise\include;third_party\rnnoise\src;rnnoise_model</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);$(DDK_INC_PATH);include;src;nkf_aec;nkf_aec\include;.;$(IntDir);third_party\speexdsp\include;build\speexdsp\include;third_party\speexdsp\libspeexdsp;third_party\speexdsp\win32;third_party\rnnoise\include;third_party\rnnoise\src;rnnoise_model</AdditionalIncludeDirectories>
       <ExceptionHandling>
       </ExceptionHandling>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
@@ -153,6 +153,13 @@ cmake --build "$(ProjectDir)build\speexdsp" --config $(Configuration)
   <ItemGroup>
     <ClCompile Include="src\AecApoDll.cpp" />
     <ClCompile Include="src\AecApoMFX.cpp" />
+    <ClCompile Include="nkf_aec\core\nkf_aec.cpp" />
+    <ClCompile Include="nkf_aec\dsp\kiss_fft_wrapper.cpp" />
+    <ClCompile Include="nkf_aec\math\activations.cpp" />
+    <ClCompile Include="nkf_aec\math\matrix_helper.cpp" />
+    <ClCompile Include="nkf_aec\nn\complex_gru.cpp" />
+    <ClCompile Include="nkf_aec\nn\gru.cpp" />
+    <ClCompile Include="nkf_aec\nn\kgnet.cpp" />
     <Midl Include="src\AecApoDll.idl" />
     <ResourceCompile Include="src\AecApoDll.rc" />
   </ItemGroup>
@@ -168,6 +175,14 @@ cmake --build "$(ProjectDir)build\speexdsp" --config $(Configuration)
   <ItemGroup>
     <ClInclude Exclude="@(ClInclude)" Include="src\AecApo.h" />
     <ClInclude Exclude="@(ClInclude)" Include="src\AecApoHsa.h" />
+    <ClInclude Exclude="@(ClInclude)" Include="nkf_aec\include\nkf_aec\nkf_aec.h" />
+    <ClInclude Exclude="@(ClInclude)" Include="nkf_aec\dsp\kiss_fft_wrapper.h" />
+    <ClInclude Exclude="@(ClInclude)" Include="nkf_aec\math\activations.h" />
+    <ClInclude Exclude="@(ClInclude)" Include="nkf_aec\math\matrix_helper.h" />
+    <ClInclude Exclude="@(ClInclude)" Include="nkf_aec\math\simd_size.h" />
+    <ClInclude Exclude="@(ClInclude)" Include="nkf_aec\nn\complex_gru.h" />
+    <ClInclude Exclude="@(ClInclude)" Include="nkf_aec\nn\gru.h" />
+    <ClInclude Exclude="@(ClInclude)" Include="nkf_aec\nn\kgnet.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

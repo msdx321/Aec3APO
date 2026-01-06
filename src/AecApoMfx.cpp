@@ -30,6 +30,7 @@
 #include "speex/speex_echo.h"
 #include "speex/speex_resampler.h"
 #include "rnnoise.h"
+#include "nkf_aec/nkf_aec.h"
 
 CAecApoMFX::~CAecApoMFX()
 {
@@ -51,6 +52,8 @@ namespace
     constexpr int kRnnoiseVadGraceMs = 200;
     constexpr float kRnnoisePcmScale = 32768.0f;
     constexpr float kRnnoisePcmInvScale = 1.0f / 32768.0f;
+    constexpr int kNkfSampleRateHz = 16000;
+    constexpr size_t kNkfHopSize = 256;
 
     static bool IsSupportedAecSampleRate(float rate_hz)
     {
@@ -529,6 +532,172 @@ void CAecApoMFX::InitializeRnnoiseProcessors()
     }
 }
 
+void CAecApoMFX::InitializeNkfProcessors()
+{
+    m_nkfReady = false;
+    m_nkfAec.reset();
+    m_nkfResamplerIn.reset();
+    m_nkfResamplerOut.reset();
+    m_nkfResamplerRenderIn.reset();
+    m_nkfSampleRateHz = kNkfSampleRateHz;
+    m_nkfHopSize = kNkfHopSize;
+
+    m_nkfCaptureFifo.Init(static_cast<size_t>(kNkfSampleRateHz));
+    m_nkfRenderFifo.Init(static_cast<size_t>(kNkfSampleRateHz));
+    m_nkfOutputFifo.Init(static_cast<size_t>(kNkfSampleRateHz));
+
+    if (m_sampleRateHz > 0 && m_sampleRateHz != kNkfSampleRateHz)
+    {
+        int err = 0;
+        m_nkfResamplerIn.reset(speex_resampler_init(
+            1, m_sampleRateHz, kNkfSampleRateHz, SPEEX_RESAMPLER_QUALITY_MAX, &err));
+        m_nkfResamplerOut.reset(speex_resampler_init(
+            1, kNkfSampleRateHz, m_sampleRateHz, SPEEX_RESAMPLER_QUALITY_MAX, &err));
+    }
+
+    if (m_renderSampleRateHz > 0 && m_renderSampleRateHz != kNkfSampleRateHz)
+    {
+        int err = 0;
+        m_nkfResamplerRenderIn.reset(speex_resampler_init(
+            1, m_renderSampleRateHz, kNkfSampleRateHz, SPEEX_RESAMPLER_QUALITY_MAX, &err));
+    }
+
+    m_nkfAec = std::make_unique<nkf_aec::NkfAec>();
+    if (m_nkfAec && m_nkfAec->Initialize(nullptr))
+    {
+        m_nkfHopSize = m_nkfAec->HopSize();
+        m_nkfInputHopScratch.assign(m_nkfHopSize, 0.0f);
+        m_nkfRefHopScratch.assign(m_nkfHopSize, 0.0f);
+        m_nkfOutputHopScratch.assign(m_nkfHopSize, 0.0f);
+        m_nkfReady = (m_frameSize > 0);
+    }
+}
+
+void CAecApoMFX::ProcessNkfFrame(std::vector<float> &captureFrameScratch, size_t frameSize)
+{
+    if (!m_nkfReady || frameSize == 0)
+    {
+        return;
+    }
+
+    if (m_nkfBypassScratch.size() < frameSize)
+    {
+        m_nkfBypassScratch.resize(frameSize);
+    }
+    std::copy(captureFrameScratch.begin(),
+              captureFrameScratch.begin() + frameSize,
+              m_nkfBypassScratch.begin());
+
+    // Resample capture to 16 kHz and push into NKF FIFO.
+    if (m_nkfResamplerIn)
+    {
+        spx_uint32_t inLen = static_cast<spx_uint32_t>(frameSize);
+        spx_uint32_t outLen = static_cast<spx_uint32_t>(
+            (static_cast<uint64_t>(frameSize) * kNkfSampleRateHz) / m_sampleRateHz + 16);
+        if (m_nkfCaptureResampleScratch.size() < outLen)
+        {
+            m_nkfCaptureResampleScratch.resize(outLen);
+        }
+
+        speex_resampler_process_float(m_nkfResamplerIn.get(),
+                                      0,
+                                      captureFrameScratch.data(),
+                                      &inLen,
+                                      m_nkfCaptureResampleScratch.data(),
+                                      &outLen);
+        if (outLen > 0)
+        {
+            m_nkfCaptureFifo.Push(m_nkfCaptureResampleScratch.data(), outLen);
+        }
+    }
+    else
+    {
+        m_nkfCaptureFifo.Push(captureFrameScratch.data(), frameSize);
+    }
+
+    // Process available hop-sized blocks (placeholder pass-through).
+    while (m_nkfCaptureFifo.Count() >= m_nkfHopSize)
+    {
+        m_nkfCaptureFifo.Pop(m_nkfInputHopScratch.data(), m_nkfHopSize);
+        size_t gotRef = m_nkfRenderFifo.Pop(m_nkfRefHopScratch.data(), m_nkfHopSize);
+        if (gotRef < m_nkfHopSize)
+        {
+            std::fill(m_nkfRefHopScratch.begin() + gotRef, m_nkfRefHopScratch.end(), 0.0f);
+        }
+
+        bool processed = false;
+        if (m_nkfAec)
+        {
+            processed = m_nkfAec->ProcessBlock(m_nkfInputHopScratch.data(),
+                                               m_nkfRefHopScratch.data(),
+                                               m_nkfOutputHopScratch.data(),
+                                               static_cast<unsigned>(m_nkfHopSize));
+        }
+        if (!processed)
+        {
+            std::copy_n(m_nkfInputHopScratch.data(), m_nkfHopSize, m_nkfOutputHopScratch.data());
+        }
+        m_nkfOutputFifo.Push(m_nkfOutputHopScratch.data(), m_nkfHopSize);
+    }
+
+    // Resample NKF output back to native sample rate.
+    size_t neededIn = frameSize;
+    if (m_sampleRateHz != kNkfSampleRateHz)
+    {
+        neededIn = static_cast<size_t>(
+            (static_cast<uint64_t>(frameSize) * kNkfSampleRateHz + m_sampleRateHz - 1) / m_sampleRateHz);
+    }
+
+    if (m_nkfOutputResampleInScratch.size() < neededIn)
+    {
+        m_nkfOutputResampleInScratch.resize(neededIn);
+    }
+    size_t available = m_nkfOutputFifo.Pop(m_nkfOutputResampleInScratch.data(), neededIn);
+
+    if (m_nkfResamplerOut)
+    {
+        spx_uint32_t inLen = static_cast<spx_uint32_t>(available);
+        spx_uint32_t outLen = static_cast<spx_uint32_t>(frameSize);
+        if (m_nkfOutputResampleScratch.size() < frameSize)
+        {
+            m_nkfOutputResampleScratch.resize(frameSize);
+        }
+
+        speex_resampler_process_float(m_nkfResamplerOut.get(),
+                                      0,
+                                      m_nkfOutputResampleInScratch.data(),
+                                      &inLen,
+                                      m_nkfOutputResampleScratch.data(),
+                                      &outLen);
+
+        size_t produced = outLen;
+        if (produced > 0)
+        {
+            std::copy_n(m_nkfOutputResampleScratch.data(), produced, captureFrameScratch.data());
+        }
+        if (produced < frameSize)
+        {
+            std::copy(m_nkfBypassScratch.begin() + produced,
+                      m_nkfBypassScratch.begin() + frameSize,
+                      captureFrameScratch.begin() + produced);
+        }
+    }
+    else
+    {
+        size_t produced = (std::min)(available, frameSize);
+        if (produced > 0)
+        {
+            std::copy_n(m_nkfOutputResampleInScratch.data(), produced, captureFrameScratch.data());
+        }
+        if (produced < frameSize)
+        {
+            std::copy(m_nkfBypassScratch.begin() + produced,
+                      m_nkfBypassScratch.begin() + frameSize,
+                      captureFrameScratch.begin() + produced);
+        }
+    }
+}
+
 #pragma AVRT_CODE_BEGIN
 //-------------------------------------------------------------------------
 // Description:
@@ -612,7 +781,13 @@ CAecApoMFX::APOProcess(
                            inputSilent,
                            m_captureScratch.data());
 
-        if (!m_speexState || m_frameSize == 0)
+        if (m_frameSize == 0 ||
+#if AEC_USE_NKF
+            !m_nkfReady
+#else
+            !m_speexState
+#endif
+        )
         {
             ATLASSERT(m_outputScratch.capacity() >= frames);
             if (m_outputScratch.size() < frames)
@@ -641,7 +816,11 @@ CAecApoMFX::APOProcess(
             while (m_captureFifo.Count() >= m_frameSize)
             {
                 m_captureFifo.Pop(m_captureFrameScratch.data(), m_frameSize);
+#if AEC_USE_NKF
+                ProcessNkfFrame(m_captureFrameScratch, m_frameSize);
+#else
                 ProcessSpeexFrame(m_captureFrameScratch, m_frameSize);
+#endif
                 ProcessRnnoiseFrame(m_captureFrameScratch, m_frameSize);
                 m_outputFifo.Push(m_captureFrameScratch.data(), m_frameSize);
             }
@@ -741,6 +920,7 @@ STDMETHODIMP CAecApoMFX::LockForProcess(UINT32 u32NumInputConnections,
 
     // Initialize processors
     InitializeSpeexProcessors();
+    InitializeNkfProcessors();
     InitializeRnnoiseProcessors();
 
     hr = CBaseAudioProcessingObject::LockForProcess(u32NumInputConnections,
@@ -1222,6 +1402,16 @@ CAecApoMFX::AddAuxiliaryInput(
     m_renderSamplesPerFrame = renderFormat.dwSamplesPerFrame;
     m_renderSampleRateHz = GetClosestSupportedSampleRate(renderFormat.fFramesPerSecond);
     m_renderSampleFormat = GetAecSampleFormat(renderFormat);
+    if (m_renderSampleRateHz > 0 && m_renderSampleRateHz != kNkfSampleRateHz)
+    {
+        int err = 0;
+        m_nkfResamplerRenderIn.reset(speex_resampler_init(
+            1, m_renderSampleRateHz, kNkfSampleRateHz, SPEEX_RESAMPLER_QUALITY_MAX, &err));
+    }
+    else
+    {
+        m_nkfResamplerRenderIn.reset();
+    }
 
     // This APO can only handle 1 auxiliary input
     IF_TRUE_ACTION_JUMP(m_auxiliaryInputId != 0, hResult = APOERR_NUM_CONNECTIONS_INVALID, Exit);
@@ -1279,6 +1469,8 @@ CAecApoMFX::RemoveAuxiliaryInput(DWORD dwInputId)
     m_renderSamplesPerFrame = 0;
     m_renderSampleRateHz = 0;
     m_renderSampleFormat = AecSampleFormat::kUnknown;
+    m_nkfResamplerRenderIn.reset();
+    m_nkfRenderFifo.Reset();
 
     // Signal to AEC algorithm that there is no longer any reference audio stream
 
@@ -1358,6 +1550,33 @@ CAecApoMFX::AcceptInput(DWORD dwInputId,
                        m_renderScratch.data());
 
     // Lock-free FIFO - no critical section needed
+    if (m_nkfReady)
+    {
+        if (m_nkfResamplerRenderIn)
+        {
+            spx_uint32_t inLen = static_cast<spx_uint32_t>(frames);
+            spx_uint32_t outLen = static_cast<spx_uint32_t>(
+                (static_cast<uint64_t>(frames) * kNkfSampleRateHz) / m_renderSampleRateHz + 16);
+            if (m_nkfRenderResampleScratch.size() < outLen)
+            {
+                m_nkfRenderResampleScratch.resize(outLen);
+            }
+            speex_resampler_process_float(m_nkfResamplerRenderIn.get(),
+                                          0,
+                                          m_renderScratch.data(),
+                                          &inLen,
+                                          m_nkfRenderResampleScratch.data(),
+                                          &outLen);
+            if (outLen > 0)
+            {
+                m_nkfRenderFifo.Push(m_nkfRenderResampleScratch.data(), outLen);
+            }
+        }
+        else
+        {
+            m_nkfRenderFifo.Push(m_renderScratch.data(), frames);
+        }
+    }
     if (m_speexState)
     {
         m_speexRenderFifo.Push(m_renderScratch.data(), frames);
