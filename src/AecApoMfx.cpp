@@ -25,6 +25,7 @@
 
 #include "AecApo.h"
 #include "SampleConverter.h"
+#include "SampleConverterSIMD.h"
 #include <devicetopology.h>
 
 #include "speex/speex_echo.h"
@@ -41,7 +42,7 @@ namespace
     constexpr int kDefaultSampleRateHz = 48000;
     constexpr int kMaxInputChannels = 16;
     constexpr float kSampleRateMatchToleranceHz = 1.0f;
-    constexpr std::array<int, 5> kSupportedSampleRatesHz = {8000, 16000, 32000, 44100, 48000};
+    constexpr std::array<int, 4> kSupportedSampleRatesHz = {8000, 16000, 32000, 48000};
 
     // Speex configuration constants
     constexpr int kFilterTailMultiplier = 10;  // 100ms tail (10 * 10ms frames)
@@ -189,13 +190,11 @@ static void ExtractMonoSamples(const void *input,
         break;
 
     case AecSampleFormat::kPcm24In32:
-        ExtractMonoSamplesTyped<int32_t>(input, frames, channels, averageChannels, [](int32_t v)
-                                         { return ConverterTraits<int32_t>::ToFloat24(SignExtend24(v)); }, out);
+        ExtractMonoSamplesInt32_PCM24In32(input, frames, channels, averageChannels, out);
         break;
 
     case AecSampleFormat::kPcm32:
-        ExtractMonoSamplesTyped<int32_t>(input, frames, channels, averageChannels,
-                                         ConverterTraits<int32_t>::ToFloat32, out);
+        ExtractMonoSamplesInt32_PCM32(input, frames, channels, averageChannels, out);
         break;
 
     default:
@@ -232,13 +231,11 @@ static void WriteMonoSamples(void *output,
         break;
 
     case AecSampleFormat::kPcm24In32:
-        WriteMonoSamplesTyped<int32_t>(output, frames, channels,
-                                       ConverterTraits<int32_t>::FromFloat24, mono);
+        WriteMonoSamplesInt32_PCM24In32(output, frames, channels, mono);
         break;
 
     case AecSampleFormat::kPcm32:
-        WriteMonoSamplesTyped<int32_t>(output, frames, channels,
-                                       ConverterTraits<int32_t>::FromFloat32, mono);
+        WriteMonoSamplesInt32_PCM32(output, frames, channels, mono);
         break;
 
     default:
@@ -293,24 +290,27 @@ void CAecApoMFX::ProcessSpeexFrame(std::vector<float> &captureFrameScratch, size
                   0.0f);
     }
 
-    // Vectorized float->int16 conversion
-    std::transform(captureFrameScratch.begin(), captureFrameScratch.begin() + frameSize,
-                   speexMic16.begin(),
-                   ConverterTraits<int16_t>::FromFloat);
+    // AVX2-optimized float->int16 conversion
+    AudioSampleConverter::SIMD::ConvertFloatToInt16_AVX2(
+        captureFrameScratch.data(),
+        speexMic16.data(),
+        frameSize);
 
-    std::transform(renderFrameScratch.begin(), renderFrameScratch.begin() + frameSize,
-                   speexRef16.begin(),
-                   ConverterTraits<int16_t>::FromFloat);
+    AudioSampleConverter::SIMD::ConvertFloatToInt16_AVX2(
+        renderFrameScratch.data(),
+        speexRef16.data(),
+        frameSize);
 
     speex_echo_cancellation(m_speexState.get(),
                             speexMic16.data(),
                             speexRef16.data(),
                             speexOut16.data());
 
-    // Vectorized int16->float conversion
-    std::transform(speexOut16.begin(), speexOut16.begin() + frameSize,
-                   captureFrameScratch.begin(),
-                   ConverterTraits<int16_t>::ToFloat);
+    // AVX2-optimized int16->float conversion
+    AudioSampleConverter::SIMD::ConvertInt16ToFloat_AVX2(
+        speexOut16.data(),
+        captureFrameScratch.data(),
+        frameSize);
 }
 
 void CAecApoMFX::ProcessRnnoiseFrame(std::vector<float> &captureFrameScratch, size_t frameSize)
@@ -356,12 +356,11 @@ void CAecApoMFX::ProcessRnnoiseFrame(std::vector<float> &captureFrameScratch, si
 
     if (rnnoiseReady)
     {
-        // Vectorized PCM scale up
-        std::transform(m_rnnoiseInputScratch.begin(),
-                       m_rnnoiseInputScratch.begin() + m_rnnoiseFrameSize,
-                       m_rnnoiseInputScratch.begin(),
-                       [](float v)
-                       { return v * kRnnoisePcmScale; });
+        // AVX2-optimized PCM scale up
+        AudioSampleConverter::SIMD::ScaleFloatArray_AVX2(
+            m_rnnoiseInputScratch.data(),
+            m_rnnoiseFrameSize,
+            kRnnoisePcmScale);
 
         float vad = rnnoise_process_frame(m_rnnoiseState.get(),
                                           m_rnnoiseOutputScratch.data(),
@@ -385,12 +384,11 @@ void CAecApoMFX::ProcessRnnoiseFrame(std::vector<float> &captureFrameScratch, si
                       0.0f);
         }
 
-        // Vectorized PCM scale down
-        std::transform(m_rnnoiseOutputScratch.begin(),
-                       m_rnnoiseOutputScratch.begin() + m_rnnoiseFrameSize,
-                       m_rnnoiseOutputScratch.begin(),
-                       [](float v)
-                       { return v * kRnnoisePcmInvScale; });
+        // AVX2-optimized PCM scale down
+        AudioSampleConverter::SIMD::ScaleFloatArray_AVX2(
+            m_rnnoiseOutputScratch.data(),
+            m_rnnoiseFrameSize,
+            kRnnoisePcmInvScale);
     }
 
     if (rnnoiseReady && m_rnnoiseResamplerIn && m_rnnoiseResamplerOut)

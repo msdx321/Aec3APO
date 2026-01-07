@@ -10,9 +10,18 @@
 
 #include <cstdint>
 #include <algorithm>
+#include <type_traits>
 
 namespace AudioSampleConverter
 {
+    // Forward declarations for SIMD functions
+    namespace SIMD
+    {
+        void ExtractStereoToMono_Float_AVX2(const float *input, float *output, size_t frames);
+        void WriteMonoToStereo_Float_AVX2(const float *input, float *output, size_t frames);
+        void ConvertFloatToInt32_AVX2(const float *input, int32_t *output, size_t count, float scale_factor);
+        void ConvertInt32ToFloat_AVX2(const int32_t *input, float *output, size_t count, float scale_factor);
+    }
 
     // Sample format conversion scale factors
     constexpr float kInt16ScaleFactor = 32768.0f;
@@ -112,6 +121,27 @@ namespace AudioSampleConverter
                 scaled = kInt24MinValue;
             return static_cast<int32_t>(scaled);
         }
+
+        // Batch conversion helpers for SIMD
+        static void ToFloat32Batch(const int32_t *input, float *output, size_t count)
+        {
+            SIMD::ConvertInt32ToFloat_AVX2(input, output, count, kInt32ScaleFactor);
+        }
+
+        static void FromFloat32Batch(const float *input, int32_t *output, size_t count)
+        {
+            SIMD::ConvertFloatToInt32_AVX2(input, output, count, kInt32ScaleFactor);
+        }
+
+        static void ToFloat24Batch(const int32_t *input, float *output, size_t count)
+        {
+            SIMD::ConvertInt32ToFloat_AVX2(input, output, count, kInt24ScaleFactor);
+        }
+
+        static void FromFloat24Batch(const float *input, int32_t *output, size_t count)
+        {
+            SIMD::ConvertFloatToInt32_AVX2(input, output, count, kInt24ScaleFactor);
+        }
     };
 
     //
@@ -144,7 +174,168 @@ namespace AudioSampleConverter
     }
 
     //
-    // Extract mono samples from multi-channel input with template-based conversion
+    // Specialized extraction for Int32 formats with SIMD
+    //
+    inline void ExtractMonoSamplesInt32_PCM32(
+        const void *input,
+        uint32_t frames,
+        uint32_t channels,
+        bool averageChannels,
+        float *out)
+    {
+        const int32_t *in = static_cast<const int32_t *>(input);
+
+        // AVX2 fast path for mono (channels == 1, no averaging needed)
+        if (channels == 1)
+        {
+            SIMD::ConvertInt32ToFloat_AVX2(in, out, frames, kInt32ScaleFactor);
+            return;
+        }
+
+        // Fall back to scalar for multi-channel
+        if (averageChannels && channels > 1)
+        {
+            for (uint32_t frame = 0; frame < frames; ++frame)
+            {
+                const int32_t *framePtr = in + (frame * channels);
+                float sum = 0.0f;
+                for (uint32_t ch = 0; ch < channels; ++ch)
+                {
+                    sum += ConverterTraits<int32_t>::ToFloat32(framePtr[ch]);
+                }
+                out[frame] = sum / static_cast<float>(channels);
+            }
+        }
+        else
+        {
+            // Extract first channel with SIMD
+            if (channels > 1)
+            {
+                // Deinterleave first channel to temp buffer, then convert
+                std::vector<int32_t> temp(frames);
+                for (uint32_t frame = 0; frame < frames; ++frame)
+                {
+                    temp[frame] = in[frame * channels];
+                }
+                SIMD::ConvertInt32ToFloat_AVX2(temp.data(), out, frames, kInt32ScaleFactor);
+            }
+        }
+    }
+
+    inline void ExtractMonoSamplesInt32_PCM24In32(
+        const void *input,
+        uint32_t frames,
+        uint32_t channels,
+        bool averageChannels,
+        float *out)
+    {
+        const int32_t *in = static_cast<const int32_t *>(input);
+
+        // AVX2 fast path for mono (channels == 1, no averaging needed)
+        if (channels == 1)
+        {
+            // Sign-extend 24-bit values, then convert with SIMD
+            std::vector<int32_t> temp(frames);
+            for (uint32_t frame = 0; frame < frames; ++frame)
+            {
+                temp[frame] = SignExtend24(in[frame]);
+            }
+            SIMD::ConvertInt32ToFloat_AVX2(temp.data(), out, frames, kInt24ScaleFactor);
+            return;
+        }
+
+        // Fall back to scalar for multi-channel
+        if (averageChannels && channels > 1)
+        {
+            for (uint32_t frame = 0; frame < frames; ++frame)
+            {
+                const int32_t *framePtr = in + (frame * channels);
+                float sum = 0.0f;
+                for (uint32_t ch = 0; ch < channels; ++ch)
+                {
+                    sum += ConverterTraits<int32_t>::ToFloat24(SignExtend24(framePtr[ch]));
+                }
+                out[frame] = sum / static_cast<float>(channels);
+            }
+        }
+        else
+        {
+            // Extract first channel
+            std::vector<int32_t> temp(frames);
+            for (uint32_t frame = 0; frame < frames; ++frame)
+            {
+                temp[frame] = SignExtend24(in[frame * channels]);
+            }
+            SIMD::ConvertInt32ToFloat_AVX2(temp.data(), out, frames, kInt24ScaleFactor);
+        }
+    }
+
+    //
+    // Specialized writing for Int32 formats with SIMD
+    //
+    inline void WriteMonoSamplesInt32_PCM32(
+        void *output,
+        uint32_t frames,
+        uint32_t channels,
+        const float *mono)
+    {
+        int32_t *out = static_cast<int32_t *>(output);
+
+        // AVX2 fast path for mono (channels == 1)
+        if (channels == 1)
+        {
+            SIMD::ConvertFloatToInt32_AVX2(mono, out, frames, kInt32ScaleFactor);
+            return;
+        }
+
+        // Multi-channel: convert to temp buffer, then replicate
+        std::vector<int32_t> temp(frames);
+        SIMD::ConvertFloatToInt32_AVX2(mono, temp.data(), frames, kInt32ScaleFactor);
+
+        for (uint32_t frame = 0; frame < frames; ++frame)
+        {
+            int32_t value = temp[frame];
+            int32_t *framePtr = out + (frame * channels);
+            for (uint32_t ch = 0; ch < channels; ++ch)
+            {
+                framePtr[ch] = value;
+            }
+        }
+    }
+
+    inline void WriteMonoSamplesInt32_PCM24In32(
+        void *output,
+        uint32_t frames,
+        uint32_t channels,
+        const float *mono)
+    {
+        int32_t *out = static_cast<int32_t *>(output);
+
+        // AVX2 fast path for mono (channels == 1)
+        if (channels == 1)
+        {
+            SIMD::ConvertFloatToInt32_AVX2(mono, out, frames, kInt24ScaleFactor);
+            return;
+        }
+
+        // Multi-channel: convert to temp buffer, then replicate
+        std::vector<int32_t> temp(frames);
+        SIMD::ConvertFloatToInt32_AVX2(mono, temp.data(), frames, kInt24ScaleFactor);
+
+        for (uint32_t frame = 0; frame < frames; ++frame)
+        {
+            int32_t value = temp[frame];
+            int32_t *framePtr = out + (frame * channels);
+            for (uint32_t ch = 0; ch < channels; ++ch)
+            {
+                framePtr[ch] = value;
+            }
+        }
+    }
+
+    //
+    // Extract mono samples from multi-channel input
+    // AVX2-optimized for float stereo, scalar fallback for int16 and edge cases
     //
     template <typename T, typename ConvertFunc>
     inline void ExtractMonoSamplesTyped(
@@ -157,9 +348,22 @@ namespace AudioSampleConverter
     {
         const T *in = static_cast<const T *>(input);
 
+        // AVX2 fast path for float stereo averaging
+        if constexpr (std::is_same_v<T, float>)
+        {
+            if (averageChannels && channels == 2)
+            {
+                SIMD::ExtractStereoToMono_Float_AVX2(
+                    static_cast<const float *>(input),
+                    out,
+                    frames);
+                return;
+            }
+        }
+
+        // Scalar path for int16 and multi-channel (>2) edge cases
         if (averageChannels && channels > 1)
         {
-            // Average all channels to mono
             for (uint32_t frame = 0; frame < frames; ++frame)
             {
                 const T *framePtr = in + (frame * channels);
@@ -173,7 +377,6 @@ namespace AudioSampleConverter
         }
         else
         {
-            // Extract first channel only
             for (uint32_t frame = 0; frame < frames; ++frame)
             {
                 out[frame] = toFloat(in[frame * channels]);
@@ -182,7 +385,8 @@ namespace AudioSampleConverter
     }
 
     //
-    // Write mono samples to multi-channel output with template-based conversion
+    // Write mono samples to multi-channel output
+    // AVX2-optimized for float stereo, scalar fallback for int16 and edge cases
     //
     template <typename T, typename ConvertFunc>
     inline void WriteMonoSamplesTyped(
@@ -194,9 +398,22 @@ namespace AudioSampleConverter
     {
         T *out = static_cast<T *>(output);
 
+        // AVX2 fast path for float stereo replication
+        if constexpr (std::is_same_v<T, float>)
+        {
+            if (channels == 2)
+            {
+                SIMD::WriteMonoToStereo_Float_AVX2(
+                    in,
+                    static_cast<float *>(output),
+                    frames);
+                return;
+            }
+        }
+
+        // Scalar path for int16 and multi-channel (>2) edge cases
         if (channels == 1)
         {
-            // Mono output - direct conversion
             for (uint32_t frame = 0; frame < frames; ++frame)
             {
                 out[frame] = fromFloat(in[frame]);
@@ -204,7 +421,6 @@ namespace AudioSampleConverter
         }
         else
         {
-            // Multi-channel output - replicate mono to all channels
             for (uint32_t frame = 0; frame < frames; ++frame)
             {
                 T value = fromFloat(in[frame]);

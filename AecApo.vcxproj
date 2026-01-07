@@ -153,6 +153,9 @@ cmake --build "$(ProjectDir)build\speexdsp" --config $(Configuration)
   <ItemGroup>
     <ClCompile Include="src\AecApoDll.cpp" />
     <ClCompile Include="src\AecApoMFX.cpp" />
+    <ClCompile Include="src\SampleConverterSIMD.cpp">
+      <EnableEnhancedInstructionSet Condition="'$(Platform)'=='x64'">AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
+    </ClCompile>
     <Midl Include="src\AecApoDll.idl" />
     <ResourceCompile Include="src\AecApoDll.rc" />
   </ItemGroup>
@@ -168,6 +171,8 @@ cmake --build "$(ProjectDir)build\speexdsp" --config $(Configuration)
   <ItemGroup>
     <ClInclude Exclude="@(ClInclude)" Include="src\AecApo.h" />
     <ClInclude Exclude="@(ClInclude)" Include="src\AecApoHsa.h" />
+    <ClInclude Exclude="@(ClInclude)" Include="src\SampleConverter.h" />
+    <ClInclude Exclude="@(ClInclude)" Include="src\SampleConverterSIMD.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>
