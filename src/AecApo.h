@@ -18,6 +18,7 @@
 #include <audioengineextensionapo.h>
 #include <vector>
 #include <cstdint>
+#include <atomic>
 
 #include "SampleFifo.h"
 #include <memory>
@@ -34,11 +35,13 @@ _Analysis_mode_(_Analysis_code_type_user_driver_)
     };
 
 typedef struct SpeexEchoState_ SpeexEchoState;
+typedef struct SpeexPreprocessState_ SpeexPreprocessState;
 typedef struct SpeexResamplerState_ SpeexResamplerState;
 typedef struct DenoiseState DenoiseState;
 
 // Forward declare Speex and RNNoise destroy functions
 extern "C" void speex_echo_state_destroy(SpeexEchoState *st);
+extern "C" void speex_preprocess_state_destroy(SpeexPreprocessState *st);
 extern "C" void speex_resampler_destroy(SpeexResamplerState *st);
 extern "C" void rnnoise_destroy(DenoiseState *st);
 
@@ -55,6 +58,20 @@ namespace SpeexRAII
     };
 
     using EchoStatePtr = std::unique_ptr<SpeexEchoState, EchoStateDeleter>;
+}
+
+namespace SpeexPreprocessRAII
+{
+    struct PreprocessStateDeleter
+    {
+        void operator()(SpeexPreprocessState *state) const
+        {
+            if (state)
+                speex_preprocess_state_destroy(state);
+        }
+    };
+
+    using PreprocessStatePtr = std::unique_ptr<SpeexPreprocessState, PreprocessStateDeleter>;
 }
 
 namespace SpeexResamplerRAII
@@ -195,23 +212,31 @@ private:
         APO_CONNECTION_DESCRIPTOR **ppOutputConnections);
     void InitializeProcessingBuffers();
     void InitializeSpeexProcessors();
+    void InitializeRenderReferenceProcessors();
     void InitializeRnnoiseProcessors();
+    void ResetRenderReferenceState();
+    UINT64 SamplesToQpcTicks(size_t sampleCount, int sampleRateHz) const;
+    void QueueRenderReferenceSamples(const float *samples, size_t sampleCount, UINT64 firstSampleQpc);
+    void PublishRenderReferenceFrame(const float *frameData, UINT64 frameStartQpc);
+    bool TryGetRenderReferenceFrame(UINT64 captureQpc, float *outFrame, size_t frameSize);
 
     // Helper method for APOProcess
-    void ProcessSpeexFrame(std::vector<float> &captureFrameScratch, size_t frameSize);
+    void ProcessSpeexFrame(std::vector<float> &captureFrameScratch, size_t frameSize, UINT64 captureQpc);
     void ProcessRnnoiseFrame(std::vector<float> &captureFrameScratch, size_t frameSize);
 
     CComPtr<IAudioProcessingObjectLoggingService> m_apoLoggingService;
-    // Lock removed - using lock-free FIFO
-    SampleFifo m_speexRenderFifo;
     SampleFifo m_captureFifo;
     SampleFifo m_outputFifo;
     std::vector<float> m_renderScratch;
+    std::vector<float> m_renderResampledScratch;
+    std::vector<float> m_renderAssemblyScratch;
     std::vector<float> m_speexRenderFrameScratch;
     std::vector<float> m_captureScratch;
     std::vector<float> m_captureFrameScratch;
     std::vector<float> m_outputScratch;
     SpeexRAII::EchoStatePtr m_speexState;
+    SpeexPreprocessRAII::PreprocessStatePtr m_speexPreprocessState;
+    SpeexResamplerRAII::ResamplerStatePtr m_renderResampler;
     int m_speexFrameSize = 0;
     std::vector<int16_t> m_speexMic16;
     std::vector<int16_t> m_speexRef16;
@@ -224,6 +249,16 @@ private:
     int m_rnnoiseVadGraceSamplesRemaining = 0;
     std::vector<float> m_rnnoiseInputScratch;
     std::vector<float> m_rnnoiseOutputScratch;
+
+    std::vector<float> m_renderReferenceRing;
+    std::vector<UINT64> m_renderReferenceQpc;
+    std::unique_ptr<std::atomic<uint32_t>[]> m_renderReferenceSequence;
+    std::atomic<uint64_t> m_renderReferenceWriteCounter{0};
+    size_t m_renderReferenceSlotCount = 0;
+    size_t m_renderAssemblyCount = 0;
+    UINT64 m_renderAssemblyStartQpc = 0;
+    UINT64 m_captureFifoStartQpc = 0;
+    UINT64 m_qpcTicksPerSecond = 0;
 };
 #pragma AVRT_VTABLES_END
 

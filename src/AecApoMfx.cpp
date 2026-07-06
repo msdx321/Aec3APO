@@ -29,6 +29,7 @@
 #include <devicetopology.h>
 
 #include "speex/speex_echo.h"
+#include "speex/speex_preprocess.h"
 #include "speex/speex_resampler.h"
 #include "rnnoise.h"
 
@@ -45,13 +46,21 @@ namespace
     constexpr std::array<int, 4> kSupportedSampleRatesHz = {8000, 16000, 32000, 48000};
 
     // Speex configuration constants
-    constexpr int kFilterTailMultiplier = 10;  // 100ms tail (10 * 10ms frames)
+    constexpr int kFilterTailMultiplier = 30;  // 300ms tail (30 * 10ms frames)
     constexpr int kFrameDurationDivisor = 100; // 10ms frames (sampleRate / 100)
     constexpr int kRnnoiseSampleRateHz = 48000;
     constexpr float kRnnoiseVadThreshold = 0.6f;
     constexpr int kRnnoiseVadGraceMs = 200;
+    constexpr float kRnnoiseVadLowConfidenceGain = 0.25f;
     constexpr float kRnnoisePcmScale = 32768.0f;
     constexpr float kRnnoisePcmInvScale = 1.0f / 32768.0f;
+    constexpr size_t kMaxRealtimeScratchSamples = 48000;
+    constexpr size_t kRenderReferenceFrameSlots = 256; // 2.56 seconds at 10ms/frame
+    constexpr int kRenderReferenceDelayMs = 20;
+    constexpr int kRenderReferenceToleranceMs = 120;
+    constexpr int kSpeexNoiseSuppressDb = -10;
+    constexpr int kSpeexEchoSuppressDb = -35;
+    constexpr int kSpeexEchoSuppressActiveDb = -15;
 
     static bool IsSupportedAecSampleRate(float rate_hz)
     {
@@ -269,7 +278,165 @@ const AVRT_DATA CRegAPOProperties<1> CAecApoMFX::sm_RegProperties(
 //
 // ProcessSpeexFrame - Process one frame through Speex AEC (in-place)
 //
-void CAecApoMFX::ProcessSpeexFrame(std::vector<float> &captureFrameScratch, size_t frameSize)
+UINT64 CAecApoMFX::SamplesToQpcTicks(size_t sampleCount, int sampleRateHz) const
+{
+    if (sampleCount == 0 || sampleRateHz <= 0 || m_qpcTicksPerSecond == 0)
+    {
+        return 0;
+    }
+
+    return ((static_cast<UINT64>(sampleCount) * m_qpcTicksPerSecond) +
+            (static_cast<UINT64>(sampleRateHz) / 2)) /
+           static_cast<UINT64>(sampleRateHz);
+}
+
+void CAecApoMFX::ResetRenderReferenceState()
+{
+    m_renderAssemblyCount = 0;
+    m_renderAssemblyStartQpc = 0;
+    m_renderReferenceWriteCounter.store(0, std::memory_order_release);
+
+    if (m_renderReferenceSequence)
+    {
+        for (size_t i = 0; i < m_renderReferenceSlotCount; ++i)
+        {
+            m_renderReferenceSequence[i].store(0, std::memory_order_release);
+        }
+    }
+
+    std::fill(m_renderReferenceQpc.begin(), m_renderReferenceQpc.end(), 0);
+}
+
+void CAecApoMFX::PublishRenderReferenceFrame(const float *frameData, UINT64 frameStartQpc)
+{
+    if (frameData == nullptr || m_frameSize == 0 || m_renderReferenceSlotCount == 0 || !m_renderReferenceSequence)
+    {
+        return;
+    }
+
+    const uint64_t frameId = m_renderReferenceWriteCounter.load(std::memory_order_relaxed);
+    const size_t slot = static_cast<size_t>(frameId % m_renderReferenceSlotCount);
+    uint32_t sequence = m_renderReferenceSequence[slot].load(std::memory_order_relaxed);
+    if ((sequence & 1u) != 0)
+    {
+        ++sequence;
+    }
+
+    m_renderReferenceSequence[slot].store(sequence + 1, std::memory_order_release);
+    std::copy_n(frameData, m_frameSize, m_renderReferenceRing.data() + (slot * m_frameSize));
+    m_renderReferenceQpc[slot] = frameStartQpc;
+    m_renderReferenceSequence[slot].store(sequence + 2, std::memory_order_release);
+    m_renderReferenceWriteCounter.store(frameId + 1, std::memory_order_release);
+}
+
+void CAecApoMFX::QueueRenderReferenceSamples(const float *samples, size_t sampleCount, UINT64 firstSampleQpc)
+{
+    if (samples == nullptr || sampleCount == 0 || m_frameSize == 0 || m_renderAssemblyScratch.size() < m_frameSize)
+    {
+        return;
+    }
+
+    UINT64 currentSampleQpc = firstSampleQpc;
+    while (sampleCount > 0)
+    {
+        if (m_renderAssemblyCount == 0)
+        {
+            m_renderAssemblyStartQpc = currentSampleQpc;
+        }
+
+        const size_t remaining = m_frameSize - m_renderAssemblyCount;
+        const size_t chunk = (std::min)(sampleCount, remaining);
+        std::copy_n(samples, chunk, m_renderAssemblyScratch.data() + m_renderAssemblyCount);
+
+        m_renderAssemblyCount += chunk;
+        samples += chunk;
+        sampleCount -= chunk;
+        if (currentSampleQpc != 0)
+        {
+            currentSampleQpc += SamplesToQpcTicks(chunk, m_sampleRateHz);
+        }
+
+        if (m_renderAssemblyCount == m_frameSize)
+        {
+            PublishRenderReferenceFrame(m_renderAssemblyScratch.data(), m_renderAssemblyStartQpc);
+            m_renderAssemblyCount = 0;
+            m_renderAssemblyStartQpc = 0;
+        }
+    }
+}
+
+bool CAecApoMFX::TryGetRenderReferenceFrame(UINT64 captureQpc, float *outFrame, size_t frameSize)
+{
+    if (outFrame == nullptr || frameSize != m_frameSize || m_renderReferenceSlotCount == 0 || !m_renderReferenceSequence)
+    {
+        return false;
+    }
+
+    const uint64_t published = m_renderReferenceWriteCounter.load(std::memory_order_acquire);
+    if (published == 0)
+    {
+        return false;
+    }
+
+    UINT64 targetQpc = 0;
+    UINT64 toleranceQpc = 0;
+    if (captureQpc != 0 && m_qpcTicksPerSecond != 0)
+    {
+        const UINT64 delayQpc = (m_qpcTicksPerSecond * kRenderReferenceDelayMs) / 1000;
+        toleranceQpc = (m_qpcTicksPerSecond * kRenderReferenceToleranceMs) / 1000;
+        targetQpc = (captureQpc > delayQpc) ? (captureQpc - delayQpc) : captureQpc;
+    }
+
+    bool found = false;
+    size_t bestSlot = 0;
+    uint32_t bestSequence = 0;
+    UINT64 bestDelta = ~0ULL;
+    const uint64_t slotsToCheck = (std::min)(published, static_cast<uint64_t>(m_renderReferenceSlotCount));
+
+    for (uint64_t i = 0; i < slotsToCheck; ++i)
+    {
+        const size_t slot = static_cast<size_t>((published - 1 - i) % m_renderReferenceSlotCount);
+        const uint32_t sequence = m_renderReferenceSequence[slot].load(std::memory_order_acquire);
+        if ((sequence & 1u) != 0)
+        {
+            continue;
+        }
+
+        const UINT64 frameQpc = m_renderReferenceQpc[slot];
+        if (captureQpc == 0 || targetQpc == 0)
+        {
+            bestSlot = slot;
+            bestSequence = sequence;
+            found = true;
+            break;
+        }
+
+        if (frameQpc == 0)
+        {
+            continue;
+        }
+
+        const UINT64 delta = (frameQpc > targetQpc) ? (frameQpc - targetQpc) : (targetQpc - frameQpc);
+        if (delta < bestDelta)
+        {
+            bestDelta = delta;
+            bestSlot = slot;
+            bestSequence = sequence;
+            found = true;
+        }
+    }
+
+    if (!found || (targetQpc != 0 && bestDelta > toleranceQpc))
+    {
+        return false;
+    }
+
+    std::copy_n(m_renderReferenceRing.data() + (bestSlot * frameSize), frameSize, outFrame);
+    const uint32_t endSequence = m_renderReferenceSequence[bestSlot].load(std::memory_order_acquire);
+    return endSequence == bestSequence && ((endSequence & 1u) == 0);
+}
+
+void CAecApoMFX::ProcessSpeexFrame(std::vector<float> &captureFrameScratch, size_t frameSize, UINT64 captureQpc)
 {
     if (!m_speexState)
     {
@@ -281,13 +448,9 @@ void CAecApoMFX::ProcessSpeexFrame(std::vector<float> &captureFrameScratch, size
     std::vector<int16_t> &speexRef16 = m_speexRef16;
     std::vector<int16_t> &speexOut16 = m_speexOut16;
 
-    // Lock-free FIFO - no critical section needed
-    size_t got = m_speexRenderFifo.Pop(renderFrameScratch.data(), frameSize);
-    if (got < frameSize)
+    if (!TryGetRenderReferenceFrame(captureQpc, renderFrameScratch.data(), frameSize))
     {
-        std::fill(renderFrameScratch.begin() + got,
-                  renderFrameScratch.end(),
-                  0.0f);
+        return;
     }
 
     // AVX2-optimized float->int16 conversion
@@ -306,6 +469,11 @@ void CAecApoMFX::ProcessSpeexFrame(std::vector<float> &captureFrameScratch, size
                             speexRef16.data(),
                             speexOut16.data());
 
+    if (m_speexPreprocessState)
+    {
+        speex_preprocess_run(m_speexPreprocessState.get(), speexOut16.data());
+    }
+
     // AVX2-optimized int16->float conversion
     AudioSampleConverter::SIMD::ConvertInt16ToFloat_AVX2(
         speexOut16.data(),
@@ -320,13 +488,10 @@ void CAecApoMFX::ProcessRnnoiseFrame(std::vector<float> &captureFrameScratch, si
         return;
     }
 
-    if (m_rnnoiseInputScratch.size() < static_cast<size_t>(m_rnnoiseFrameSize))
+    if (m_rnnoiseInputScratch.size() < static_cast<size_t>(m_rnnoiseFrameSize) ||
+        m_rnnoiseOutputScratch.size() < static_cast<size_t>(m_rnnoiseFrameSize))
     {
-        m_rnnoiseInputScratch.resize(m_rnnoiseFrameSize);
-    }
-    if (m_rnnoiseOutputScratch.size() < static_cast<size_t>(m_rnnoiseFrameSize))
-    {
-        m_rnnoiseOutputScratch.resize(m_rnnoiseFrameSize);
+        return;
     }
 
     bool rnnoiseReady = false;
@@ -356,6 +521,8 @@ void CAecApoMFX::ProcessRnnoiseFrame(std::vector<float> &captureFrameScratch, si
 
     if (rnnoiseReady)
     {
+        bool attenuateLowConfidenceSpeech = false;
+
         // AVX2-optimized PCM scale up
         AudioSampleConverter::SIMD::ScaleFloatArray_AVX2(
             m_rnnoiseInputScratch.data(),
@@ -379,9 +546,15 @@ void CAecApoMFX::ProcessRnnoiseFrame(std::vector<float> &captureFrameScratch, si
         }
         else
         {
-            std::fill(m_rnnoiseOutputScratch.begin(),
-                      m_rnnoiseOutputScratch.begin() + m_rnnoiseFrameSize,
-                      0.0f);
+            attenuateLowConfidenceSpeech = true;
+        }
+
+        if (attenuateLowConfidenceSpeech)
+        {
+            AudioSampleConverter::SIMD::ScaleFloatArray_AVX2(
+                m_rnnoiseOutputScratch.data(),
+                m_rnnoiseFrameSize,
+                kRnnoiseVadLowConfidenceGain);
         }
 
         // AVX2-optimized PCM scale down
@@ -464,13 +637,39 @@ void CAecApoMFX::InitializeProcessingBuffers()
 {
     m_captureFifo.Init(static_cast<size_t>(m_sampleRateHz));
     m_outputFifo.Init(static_cast<size_t>(m_sampleRateHz));
-    m_speexRenderFifo.Init(static_cast<size_t>(m_sampleRateHz));
 
     // Pre-allocate scratch buffers to maximum expected size to avoid real-time allocations
-    constexpr size_t kMaxScratchSize = 48000; // 1 second at 48kHz
-    m_captureScratch.reserve(kMaxScratchSize);
-    m_outputScratch.reserve(kMaxScratchSize);
-    m_captureFrameScratch.reserve(m_frameSize);
+    m_captureScratch.assign(kMaxRealtimeScratchSamples, 0.0f);
+    m_outputScratch.assign(kMaxRealtimeScratchSamples, 0.0f);
+    m_renderScratch.assign(kMaxRealtimeScratchSamples, 0.0f);
+    m_renderResampledScratch.assign(kMaxRealtimeScratchSamples, 0.0f);
+    m_captureFrameScratch.assign(m_frameSize, 0.0f);
+    m_speexRenderFrameScratch.assign(m_frameSize, 0.0f);
+    m_renderAssemblyScratch.assign(m_frameSize, 0.0f);
+    m_captureFifoStartQpc = 0;
+
+    LARGE_INTEGER qpcFrequency = {};
+    if (QueryPerformanceFrequency(&qpcFrequency))
+    {
+        m_qpcTicksPerSecond = static_cast<UINT64>(qpcFrequency.QuadPart);
+    }
+    else
+    {
+        m_qpcTicksPerSecond = 0;
+    }
+
+    m_renderReferenceSlotCount = (m_frameSize > 0) ? kRenderReferenceFrameSlots : 0;
+    m_renderReferenceRing.assign(m_renderReferenceSlotCount * m_frameSize, 0.0f);
+    m_renderReferenceQpc.assign(m_renderReferenceSlotCount, 0);
+    if (m_renderReferenceSlotCount > 0)
+    {
+        m_renderReferenceSequence = std::make_unique<std::atomic<uint32_t>[]>(m_renderReferenceSlotCount);
+    }
+    else
+    {
+        m_renderReferenceSequence.reset();
+    }
+    ResetRenderReferenceState();
 }
 
 //
@@ -479,6 +678,7 @@ void CAecApoMFX::InitializeProcessingBuffers()
 void CAecApoMFX::InitializeSpeexProcessors()
 {
     // Reset Speex states (RAII unique_ptr handles destruction)
+    m_speexPreprocessState.reset();
     m_speexState.reset();
 
     m_speexFrameSize = static_cast<int>(m_frameSize);
@@ -493,7 +693,52 @@ void CAecApoMFX::InitializeSpeexProcessors()
             m_speexRef16.assign(m_frameSize, 0);
             m_speexOut16.assign(m_frameSize, 0);
             m_speexRenderFrameScratch.assign(m_frameSize, 0.0f);
+
+            m_speexPreprocessState.reset(speex_preprocess_state_init(m_speexFrameSize, m_sampleRateHz));
+            if (m_speexPreprocessState)
+            {
+                int enabled = 1;
+                int disabled = 0;
+                int noiseSuppressDb = kSpeexNoiseSuppressDb;
+                int echoSuppressDb = kSpeexEchoSuppressDb;
+                int echoSuppressActiveDb = kSpeexEchoSuppressActiveDb;
+                SpeexEchoState *echoState = m_speexState.get();
+                speex_preprocess_ctl(m_speexPreprocessState.get(), SPEEX_PREPROCESS_SET_DENOISE, &enabled);
+                speex_preprocess_ctl(m_speexPreprocessState.get(), SPEEX_PREPROCESS_SET_AGC, &disabled);
+                speex_preprocess_ctl(m_speexPreprocessState.get(), SPEEX_PREPROCESS_SET_VAD, &disabled);
+                speex_preprocess_ctl(m_speexPreprocessState.get(), SPEEX_PREPROCESS_SET_NOISE_SUPPRESS, &noiseSuppressDb);
+                speex_preprocess_ctl(m_speexPreprocessState.get(), SPEEX_PREPROCESS_SET_ECHO_SUPPRESS, &echoSuppressDb);
+                speex_preprocess_ctl(m_speexPreprocessState.get(), SPEEX_PREPROCESS_SET_ECHO_SUPPRESS_ACTIVE, &echoSuppressActiveDb);
+                speex_preprocess_ctl(m_speexPreprocessState.get(), SPEEX_PREPROCESS_SET_ECHO_STATE, echoState);
+            }
         }
+    }
+}
+
+//
+// InitializeRenderReferenceProcessors - Initialize render-to-capture resampling
+//
+void CAecApoMFX::InitializeRenderReferenceProcessors()
+{
+    m_renderResampler.reset();
+    ResetRenderReferenceState();
+
+    if (m_renderSampleRateHz <= 0 || m_sampleRateHz <= 0 || m_renderSampleRateHz == m_sampleRateHz)
+    {
+        return;
+    }
+
+    int err = 0;
+    m_renderResampler.reset(speex_resampler_init(
+        1,
+        m_renderSampleRateHz,
+        m_sampleRateHz,
+        SPEEX_RESAMPLER_QUALITY_MAX,
+        &err));
+
+    if (err != RESAMPLER_ERR_SUCCESS)
+    {
+        m_renderResampler.reset();
     }
 }
 
@@ -574,10 +819,10 @@ CAecApoMFX::APOProcess(
     ATLASSERT(ppInputConnections[0]->u32Signature == APO_CONNECTION_PROPERTY_V2_SIGNATURE);
     ATLASSERT(ppOutputConnections[0]->u32Signature == APO_CONNECTION_PROPERTY_V2_SIGNATURE);
 
-    APO_CONNECTION_PROPERTY_V2 *inConnection = reinterpret_cast<APO_CONNECTION_PROPERTY_V2 *>(ppInputConnections[0]);
-    APO_CONNECTION_PROPERTY_V2 *outConnection = reinterpret_cast<APO_CONNECTION_PROPERTY_V2 *>(ppOutputConnections[0]);
-    UNREFERENCED_PARAMETER(inConnection);
-    UNREFERENCED_PARAMETER(outConnection);
+    const APO_CONNECTION_PROPERTY_V2 *inConnection =
+        (ppInputConnections[0]->u32Signature == APO_CONNECTION_PROPERTY_V2_SIGNATURE)
+            ? reinterpret_cast<const APO_CONNECTION_PROPERTY_V2 *>(ppInputConnections[0])
+            : nullptr;
 
     // check APO_BUFFER_FLAGS.
     switch (ppInputConnections[0]->u32BufferFlags)
@@ -595,13 +840,21 @@ CAecApoMFX::APOProcess(
 
         UINT32 frames = ppInputConnections[0]->u32ValidFrameCount;
         bool inputSilent = (ppInputConnections[0]->u32BufferFlags == BUFFER_SILENT);
+        UINT64 inputQpc = (inConnection != nullptr) ? inConnection->u64QPCTime : 0;
+        APO_BUFFER_FLAGS outputBufferFlags = ppInputConnections[0]->u32BufferFlags;
 
-        // Ensure scratch buffers are large enough (should be pre-allocated in LockForProcess)
-        ATLASSERT(m_captureScratch.capacity() >= frames);
-        if (m_captureScratch.size() < frames)
+        if (frames > m_captureScratch.size() || frames > m_outputScratch.size())
         {
-            m_captureScratch.resize(frames);
+            const UINT32 outputBytesPerSample = GetBytesPerSample(m_outputSampleFormat);
+            if (outputBuffer != nullptr && outputBytesPerSample != 0)
+            {
+                ZeroMemory(outputBuffer, static_cast<SIZE_T>(frames) * m_u32SamplesPerFrame * outputBytesPerSample);
+            }
+            ppOutputConnections[0]->u32ValidFrameCount = frames;
+            ppOutputConnections[0]->u32BufferFlags = BUFFER_SILENT;
+            break;
         }
+
         ExtractMonoSamples(inputBuffer,
                            m_inputSampleFormat,
                            frames,
@@ -612,11 +865,6 @@ CAecApoMFX::APOProcess(
 
         if (!m_speexState || m_frameSize == 0)
         {
-            ATLASSERT(m_outputScratch.capacity() >= frames);
-            if (m_outputScratch.size() < frames)
-            {
-                m_outputScratch.resize(frames);
-            }
             std::copy(m_captureScratch.begin(), m_captureScratch.begin() + frames,
                       m_outputScratch.begin());
             WriteMonoSamples(outputBuffer,
@@ -627,29 +875,32 @@ CAecApoMFX::APOProcess(
         }
         else
         {
-            m_captureFifo.Push(m_captureScratch.data(), frames);
-
-            ATLASSERT(m_captureFrameScratch.capacity() >= m_frameSize);
-            if (m_captureFrameScratch.size() < m_frameSize)
+            if (m_captureFifo.Count() == 0)
             {
-                m_captureFrameScratch.resize(m_frameSize);
+                m_captureFifoStartQpc = inputQpc;
             }
+            m_captureFifo.Push(m_captureScratch.data(), frames);
 
             // Process full 10 ms blocks through AEC then RNNoise
             while (m_captureFifo.Count() >= m_frameSize)
             {
+                const UINT64 captureFrameQpc = m_captureFifoStartQpc;
                 m_captureFifo.Pop(m_captureFrameScratch.data(), m_frameSize);
-                ProcessSpeexFrame(m_captureFrameScratch, m_frameSize);
+                ProcessSpeexFrame(m_captureFrameScratch, m_frameSize, captureFrameQpc);
                 ProcessRnnoiseFrame(m_captureFrameScratch, m_frameSize);
                 m_outputFifo.Push(m_captureFrameScratch.data(), m_frameSize);
+                if (m_captureFifoStartQpc != 0)
+                {
+                    m_captureFifoStartQpc += SamplesToQpcTicks(m_frameSize, m_sampleRateHz);
+                }
             }
 
             // Emit processed samples; if not enough yet, fall back to input.
-            if (m_outputScratch.size() < frames)
-            {
-                m_outputScratch.resize(frames);
-            }
             size_t produced = m_outputFifo.Pop(m_outputScratch.data(), frames);
+            if (produced > 0)
+            {
+                outputBufferFlags = BUFFER_VALID;
+            }
             if (produced < frames)
             {
                 for (UINT32 frame = static_cast<UINT32>(produced); frame < frames; ++frame)
@@ -667,7 +918,7 @@ CAecApoMFX::APOProcess(
 
         // Set the valid frame count.
         ppOutputConnections[0]->u32ValidFrameCount = ppInputConnections[0]->u32ValidFrameCount;
-        ppOutputConnections[0]->u32BufferFlags = ppInputConnections[0]->u32BufferFlags;
+        ppOutputConnections[0]->u32BufferFlags = outputBufferFlags;
 
         break;
     }
@@ -698,7 +949,10 @@ STDMETHODIMP CAecApoMFX::GetLatency(HNSTIME *pTime)
 
     IF_TRUE_ACTION_JUMP(pTime == nullptr, hr = E_POINTER, Exit);
 
-    *pTime = 0;
+    *pTime = (m_frameSize > 0 && m_sampleRateHz > 0)
+                 ? static_cast<HNSTIME>((static_cast<UINT64>(m_frameSize) * 10000000ULL) /
+                                        static_cast<UINT64>(m_sampleRateHz))
+                 : 0;
 
 Exit:
     return hr;
@@ -739,6 +993,7 @@ STDMETHODIMP CAecApoMFX::LockForProcess(UINT32 u32NumInputConnections,
 
     // Initialize processors
     InitializeSpeexProcessors();
+    InitializeRenderReferenceProcessors();
     InitializeRnnoiseProcessors();
 
     hr = CBaseAudioProcessingObject::LockForProcess(u32NumInputConnections,
@@ -1277,6 +1532,9 @@ CAecApoMFX::RemoveAuxiliaryInput(DWORD dwInputId)
     m_renderSamplesPerFrame = 0;
     m_renderSampleRateHz = 0;
     m_renderSampleFormat = AecSampleFormat::kUnknown;
+    m_renderResampler.reset();
+    m_spLoopbackDevice.Release();
+    ResetRenderReferenceState();
 
     // Signal to AEC algorithm that there is no longer any reference audio stream
 
@@ -1336,16 +1594,25 @@ CAecApoMFX::AcceptInput(DWORD dwInputId,
     ATLASSERT(pInputConnection->u32Signature == APO_CONNECTION_PROPERTY_V2_SIGNATURE);
     ATLASSERT(dwInputId == m_auxiliaryInputId);
 
-    // Check connectionV2->property.u32BufferFlags to see whether loopback buffer is silent
-    // Provide loopback buffer and timestamp to AEC algorithm
-    UINT32 frames = pInputConnection->u32ValidFrameCount;
-    if (m_renderScratch.size() < frames)
+    if (!m_speexState || m_frameSize == 0)
     {
-        m_renderScratch.resize(frames);
+        return;
+    }
+
+    const APO_CONNECTION_PROPERTY_V2 *connectionV2 =
+        (pInputConnection->u32Signature == APO_CONNECTION_PROPERTY_V2_SIGNATURE)
+            ? reinterpret_cast<const APO_CONNECTION_PROPERTY_V2 *>(pInputConnection)
+            : nullptr;
+
+    UINT32 frames = pInputConnection->u32ValidFrameCount;
+    if (frames == 0 || frames > m_renderScratch.size())
+    {
+        return;
     }
 
     bool inputSilent = (pInputConnection->u32BufferFlags == BUFFER_SILENT ||
                         pInputConnection->pBuffer == 0);
+    UINT64 inputQpc = (connectionV2 != nullptr) ? connectionV2->u64QPCTime : 0;
     UINT32 renderChannels = (m_renderSamplesPerFrame != 0) ? m_renderSamplesPerFrame : 1;
     ExtractMonoSamples(reinterpret_cast<const void *>(pInputConnection->pBuffer),
                        m_renderSampleFormat,
@@ -1355,10 +1622,41 @@ CAecApoMFX::AcceptInput(DWORD dwInputId,
                        inputSilent,
                        m_renderScratch.data());
 
-    // Lock-free FIFO - no critical section needed
-    if (m_speexState)
+    if (!m_renderResampler)
     {
-        m_speexRenderFifo.Push(m_renderScratch.data(), frames);
+        QueueRenderReferenceSamples(m_renderScratch.data(), frames, inputQpc);
+        return;
+    }
+
+    size_t inputOffset = 0;
+    while (inputOffset < frames)
+    {
+        spx_uint32_t inLen = static_cast<spx_uint32_t>(frames - inputOffset);
+        spx_uint32_t outLen = static_cast<spx_uint32_t>(m_renderResampledScratch.size());
+        const UINT64 chunkQpc = (inputQpc != 0)
+                                  ? inputQpc + SamplesToQpcTicks(inputOffset, m_renderSampleRateHz)
+                                  : 0;
+        int err = speex_resampler_process_float(m_renderResampler.get(),
+                                                0,
+                                                m_renderScratch.data() + inputOffset,
+                                                &inLen,
+                                                m_renderResampledScratch.data(),
+                                                &outLen);
+        if (err != RESAMPLER_ERR_SUCCESS)
+        {
+            break;
+        }
+
+        if (outLen > 0)
+        {
+            QueueRenderReferenceSamples(m_renderResampledScratch.data(), outLen, chunkQpc);
+        }
+
+        if (inLen == 0)
+        {
+            break;
+        }
+        inputOffset += inLen;
     }
 }
 
