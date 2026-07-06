@@ -52,3 +52,6 @@ third_party/speexdsp/build/
 
 # RNNoise model artifacts
 rnnoise_model/*.tar.gz
+
+# CodeGraph
+.codegraph/
