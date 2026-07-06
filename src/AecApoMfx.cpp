@@ -55,8 +55,12 @@ namespace
     constexpr float kRnnoisePcmInvScale = 1.0f / 32768.0f;
     constexpr size_t kMaxRealtimeScratchSamples = 48000;
     constexpr size_t kRenderReferenceFrameSlots = 256; // 2.56 seconds at 10ms/frame
-    constexpr int kRenderReferenceDelayMs = 20;
+    constexpr int kInitialEchoDelayMs = 20;
+    constexpr int kMinEchoDelayMs = 0;
+    constexpr int kMaxEchoDelayMs = 250;
     constexpr int kRenderReferenceToleranceMs = 120;
+    constexpr int kDelayUpdateSmoothingShift = 3;
+    constexpr float kDelayEstimatorEnergyFloor = 1.0e-5f;
     constexpr int kSpeexNoiseSuppressDb = -10;
     constexpr int kSpeexEchoSuppressDb = -35;
     constexpr int kSpeexEchoSuppressActiveDb = -15;
@@ -81,6 +85,23 @@ namespace
                                         });
 
         return closest != kSupportedSampleRatesHz.end() ? *closest : kDefaultSampleRateHz;
+    }
+
+    static float ComputeMeanSquareEnergy(const float *samples, size_t sampleCount)
+    {
+        if (samples == nullptr || sampleCount == 0)
+        {
+            return 0.0f;
+        }
+
+        double sum = 0.0;
+        for (size_t i = 0; i < sampleCount; ++i)
+        {
+            const double sample = samples[i];
+            sum += sample * sample;
+        }
+
+        return static_cast<float>(sum / static_cast<double>(sampleCount));
     }
 } // namespace
 
@@ -304,6 +325,7 @@ void CAecApoMFX::ResetRenderReferenceState()
     }
 
     std::fill(m_renderReferenceQpc.begin(), m_renderReferenceQpc.end(), 0);
+    std::fill(m_renderReferenceEnergy.begin(), m_renderReferenceEnergy.end(), 0.0f);
 }
 
 void CAecApoMFX::ProcessCaptureFrame(const float *frameData, UINT64 captureFrameQpc)
@@ -374,6 +396,7 @@ void CAecApoMFX::PublishRenderReferenceFrame(const float *frameData, UINT64 fram
     m_renderReferenceSequence[slot].store(sequence + 1, std::memory_order_release);
     std::copy_n(frameData, m_frameSize, m_renderReferenceRing.data() + (slot * m_frameSize));
     m_renderReferenceQpc[slot] = frameStartQpc;
+    m_renderReferenceEnergy[slot] = ComputeMeanSquareEnergy(frameData, m_frameSize);
     m_renderReferenceSequence[slot].store(sequence + 2, std::memory_order_release);
     m_renderReferenceWriteCounter.store(frameId + 1, std::memory_order_release);
     m_renderFramesPublished.fetch_add(1, std::memory_order_relaxed);
@@ -418,7 +441,8 @@ void CAecApoMFX::QueueRenderReferenceSamples(const float *samples, size_t sample
 CAecApoMFX::ReferenceLookupStatus CAecApoMFX::TryGetRenderReferenceFrame(UINT64 captureQpc,
                                                                          float *outFrame,
                                                                          size_t frameSize,
-                                                                         UINT64 *matchedReferenceQpc)
+                                                                         UINT64 *matchedReferenceQpc,
+                                                                         float *matchedReferenceEnergy)
 {
     if (outFrame == nullptr || frameSize != m_frameSize || m_renderReferenceSlotCount == 0 || !m_renderReferenceSequence)
     {
@@ -435,7 +459,7 @@ CAecApoMFX::ReferenceLookupStatus CAecApoMFX::TryGetRenderReferenceFrame(UINT64 
     UINT64 toleranceQpc = 0;
     if (captureQpc != 0 && m_qpcTicksPerSecond != 0)
     {
-        const UINT64 delayQpc = (m_qpcTicksPerSecond * kRenderReferenceDelayMs) / 1000;
+        const UINT64 delayQpc = m_estimatedEchoDelayQpc.load(std::memory_order_relaxed);
         toleranceQpc = (m_qpcTicksPerSecond * kRenderReferenceToleranceMs) / 1000;
         targetQpc = (captureQpc > delayQpc) ? (captureQpc - delayQpc) : captureQpc;
     }
@@ -495,6 +519,10 @@ CAecApoMFX::ReferenceLookupStatus CAecApoMFX::TryGetRenderReferenceFrame(UINT64 
     {
         *matchedReferenceQpc = m_renderReferenceQpc[bestSlot];
     }
+    if (matchedReferenceEnergy != nullptr)
+    {
+        *matchedReferenceEnergy = m_renderReferenceEnergy[bestSlot];
+    }
 
     return ReferenceLookupStatus::kMatched;
 }
@@ -511,8 +539,14 @@ void CAecApoMFX::ProcessSpeexFrame(std::vector<float> &captureFrameScratch, size
     std::vector<int16_t> &speexRef16 = m_speexRef16;
     std::vector<int16_t> &speexOut16 = m_speexOut16;
 
+    UINT64 matchedReferenceQpc = 0;
+    float matchedReferenceEnergy = 0.0f;
     const ReferenceLookupStatus lookupStatus =
-        TryGetRenderReferenceFrame(captureQpc, renderFrameScratch.data(), frameSize, nullptr);
+        TryGetRenderReferenceFrame(captureQpc,
+                                   renderFrameScratch.data(),
+                                   frameSize,
+                                   &matchedReferenceQpc,
+                                   &matchedReferenceEnergy);
     if (lookupStatus != ReferenceLookupStatus::kMatched)
     {
         if (lookupStatus == ReferenceLookupStatus::kNoReference)
@@ -524,6 +558,38 @@ void CAecApoMFX::ProcessSpeexFrame(std::vector<float> &captureFrameScratch, size
             m_aecFramesBypassedBadReference.fetch_add(1, std::memory_order_relaxed);
         }
         return;
+    }
+
+    if (captureQpc != 0 && matchedReferenceQpc != 0 && m_qpcTicksPerSecond != 0)
+    {
+        const int64_t referenceDelta = static_cast<int64_t>(captureQpc) - static_cast<int64_t>(matchedReferenceQpc);
+        m_lastReferenceDeltaQpc.store(referenceDelta, std::memory_order_relaxed);
+
+        const float captureEnergy = ComputeMeanSquareEnergy(captureFrameScratch.data(), frameSize);
+        if (referenceDelta >= 0 &&
+            captureEnergy >= kDelayEstimatorEnergyFloor &&
+            matchedReferenceEnergy >= kDelayEstimatorEnergyFloor)
+        {
+            const UINT64 minDelayQpc = (m_qpcTicksPerSecond * kMinEchoDelayMs) / 1000;
+            const UINT64 maxDelayQpc = (m_qpcTicksPerSecond * kMaxEchoDelayMs) / 1000;
+            const UINT64 observedDelayQpc = static_cast<UINT64>(referenceDelta);
+            const UINT64 clampedDelayQpc = (std::min)((std::max)(observedDelayQpc, minDelayQpc), maxDelayQpc);
+            const UINT64 estimatedDelayQpc = m_estimatedEchoDelayQpc.load(std::memory_order_relaxed);
+
+            if (estimatedDelayQpc == 0)
+            {
+                m_estimatedEchoDelayQpc.store(clampedDelayQpc, std::memory_order_relaxed);
+            }
+            else
+            {
+                const int64_t delta =
+                    static_cast<int64_t>(clampedDelayQpc) - static_cast<int64_t>(estimatedDelayQpc);
+                const int64_t step = delta / (1 << kDelayUpdateSmoothingShift);
+                const UINT64 smoothedDelayQpc =
+                    static_cast<UINT64>(static_cast<int64_t>(estimatedDelayQpc) + step);
+                m_estimatedEchoDelayQpc.store(smoothedDelayQpc, std::memory_order_relaxed);
+            }
+        }
     }
 
     // AVX2-optimized float->int16 conversion
@@ -723,6 +789,7 @@ void CAecApoMFX::InitializeProcessingBuffers()
     m_renderReferenceSlotCount = (m_frameSize > 0) ? kRenderReferenceFrameSlots : 0;
     m_renderReferenceRing.assign(m_renderReferenceSlotCount * m_frameSize, 0.0f);
     m_renderReferenceQpc.assign(m_renderReferenceSlotCount, 0);
+    m_renderReferenceEnergy.assign(m_renderReferenceSlotCount, 0.0f);
     if (m_renderReferenceSlotCount > 0)
     {
         m_renderReferenceSequence = std::make_unique<std::atomic<uint32_t>[]>(m_renderReferenceSlotCount);
@@ -739,7 +806,7 @@ void CAecApoMFX::InitializeProcessingBuffers()
     m_aecFramesBypassedBadReference.store(0, std::memory_order_relaxed);
     m_rnnoiseFramesProcessed.store(0, std::memory_order_relaxed);
     m_lastReferenceDeltaQpc.store(0, std::memory_order_relaxed);
-    m_estimatedEchoDelayQpc.store((m_qpcTicksPerSecond * 20) / 1000, std::memory_order_relaxed);
+    m_estimatedEchoDelayQpc.store((m_qpcTicksPerSecond * kInitialEchoDelayMs) / 1000, std::memory_order_relaxed);
 }
 
 //

@@ -231,7 +231,8 @@ private:
     ReferenceLookupStatus TryGetRenderReferenceFrame(UINT64 captureQpc,
                                                      float *outFrame,
                                                      size_t frameSize,
-                                                     UINT64 *matchedReferenceQpc);
+                                                     UINT64 *matchedReferenceQpc,
+                                                     float *matchedReferenceEnergy);
 
     // Helper method for APOProcess
     void ProcessSpeexFrame(std::vector<float> &captureFrameScratch, size_t frameSize, UINT64 captureQpc);
@@ -265,6 +266,7 @@ private:
 
     std::vector<float> m_renderReferenceRing;
     std::vector<UINT64> m_renderReferenceQpc;
+    std::vector<float> m_renderReferenceEnergy;
     std::unique_ptr<std::atomic<uint32_t>[]> m_renderReferenceSequence;
     std::atomic<uint64_t> m_renderReferenceWriteCounter{0};
     std::atomic<uint64_t> m_captureFramesProcessed{0};
