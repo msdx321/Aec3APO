@@ -35,13 +35,11 @@ _Analysis_mode_(_Analysis_code_type_user_driver_)
     };
 
 typedef struct SpeexEchoState_ SpeexEchoState;
-typedef struct SpeexPreprocessState_ SpeexPreprocessState;
 typedef struct SpeexResamplerState_ SpeexResamplerState;
 typedef struct DenoiseState DenoiseState;
 
 // Forward declare Speex and RNNoise destroy functions
 extern "C" void speex_echo_state_destroy(SpeexEchoState *st);
-extern "C" void speex_preprocess_state_destroy(SpeexPreprocessState *st);
 extern "C" void speex_resampler_destroy(SpeexResamplerState *st);
 extern "C" void rnnoise_destroy(DenoiseState *st);
 
@@ -58,20 +56,6 @@ namespace SpeexRAII
     };
 
     using EchoStatePtr = std::unique_ptr<SpeexEchoState, EchoStateDeleter>;
-}
-
-namespace SpeexPreprocessRAII
-{
-    struct PreprocessStateDeleter
-    {
-        void operator()(SpeexPreprocessState *state) const
-        {
-            if (state)
-                speex_preprocess_state_destroy(state);
-        }
-    };
-
-    using PreprocessStatePtr = std::unique_ptr<SpeexPreprocessState, PreprocessStateDeleter>;
 }
 
 namespace SpeexResamplerRAII
@@ -249,7 +233,6 @@ private:
     std::vector<float> m_captureFrameScratch;
     std::vector<float> m_outputScratch;
     SpeexRAII::EchoStatePtr m_speexState;
-    SpeexPreprocessRAII::PreprocessStatePtr m_speexPreprocessState;
     SpeexResamplerRAII::ResamplerStatePtr m_renderResampler;
     int m_speexFrameSize = 0;
     std::vector<int16_t> m_speexMic16;

@@ -29,7 +29,6 @@
 #include <devicetopology.h>
 
 #include "speex/speex_echo.h"
-#include "speex/speex_preprocess.h"
 #include "speex/speex_resampler.h"
 #include "rnnoise.h"
 
@@ -61,9 +60,6 @@ namespace
     constexpr int kRenderReferenceToleranceMs = 120;
     constexpr int kDelayUpdateSmoothingShift = 3;
     constexpr float kDelayEstimatorEnergyFloor = 1.0e-5f;
-    constexpr int kSpeexNoiseSuppressDb = -10;
-    constexpr int kSpeexEchoSuppressDb = -35;
-    constexpr int kSpeexEchoSuppressActiveDb = -15;
 
     static bool IsSupportedAecSampleRate(float rate_hz)
     {
@@ -609,11 +605,6 @@ void CAecApoMFX::ProcessSpeexFrame(std::vector<float> &captureFrameScratch, size
                             speexOut16.data());
     m_aecFramesProcessed.fetch_add(1, std::memory_order_relaxed);
 
-    if (m_speexPreprocessState)
-    {
-        speex_preprocess_run(m_speexPreprocessState.get(), speexOut16.data());
-    }
-
     // AVX2-optimized int16->float conversion
     AudioSampleConverter::SIMD::ConvertInt16ToFloat_AVX2(
         speexOut16.data(),
@@ -815,7 +806,6 @@ void CAecApoMFX::InitializeProcessingBuffers()
 void CAecApoMFX::InitializeSpeexProcessors()
 {
     // Reset Speex states (RAII unique_ptr handles destruction)
-    m_speexPreprocessState.reset();
     m_speexState.reset();
 
     m_speexFrameSize = static_cast<int>(m_frameSize);
@@ -830,24 +820,6 @@ void CAecApoMFX::InitializeSpeexProcessors()
             m_speexRef16.assign(m_frameSize, 0);
             m_speexOut16.assign(m_frameSize, 0);
             m_speexRenderFrameScratch.assign(m_frameSize, 0.0f);
-
-            m_speexPreprocessState.reset(speex_preprocess_state_init(m_speexFrameSize, m_sampleRateHz));
-            if (m_speexPreprocessState)
-            {
-                int enabled = 1;
-                int disabled = 0;
-                int noiseSuppressDb = kSpeexNoiseSuppressDb;
-                int echoSuppressDb = kSpeexEchoSuppressDb;
-                int echoSuppressActiveDb = kSpeexEchoSuppressActiveDb;
-                SpeexEchoState *echoState = m_speexState.get();
-                speex_preprocess_ctl(m_speexPreprocessState.get(), SPEEX_PREPROCESS_SET_DENOISE, &enabled);
-                speex_preprocess_ctl(m_speexPreprocessState.get(), SPEEX_PREPROCESS_SET_AGC, &disabled);
-                speex_preprocess_ctl(m_speexPreprocessState.get(), SPEEX_PREPROCESS_SET_VAD, &disabled);
-                speex_preprocess_ctl(m_speexPreprocessState.get(), SPEEX_PREPROCESS_SET_NOISE_SUPPRESS, &noiseSuppressDb);
-                speex_preprocess_ctl(m_speexPreprocessState.get(), SPEEX_PREPROCESS_SET_ECHO_SUPPRESS, &echoSuppressDb);
-                speex_preprocess_ctl(m_speexPreprocessState.get(), SPEEX_PREPROCESS_SET_ECHO_SUPPRESS_ACTIVE, &echoSuppressActiveDb);
-                speex_preprocess_ctl(m_speexPreprocessState.get(), SPEEX_PREPROCESS_SET_ECHO_STATE, echoState);
-            }
         }
     }
 }
