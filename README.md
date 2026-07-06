@@ -30,3 +30,11 @@ Notes
 - The APO registers as an Effect Pack targeting capture endpoints (microphones).
 - SpeexDSP handles AEC; RNNoise denoising runs at 48 kHz with resampling when needed.
 - Output is mono; input supports up to 16 channels.
+
+AEC and RNNoise tuning
+- The realtime pipeline is capture frame assembly, Speex echo cancellation, then RNNoise denoise. RNNoise VAD is used only for diagnostics and grace tracking; it does not gate or attenuate speech.
+- Render loopback is assembled into timestamped 10 ms mono frames. Capture is assembled the same way, so AEC reference lookup is based on the QPC for the actual capture frame.
+- Speex preprocess denoise is disabled by default. RNNoise owns noise suppression, which avoids stacked suppressors causing cutoff, pumping, or extra speech damage.
+- AEC delay starts at 20 ms and updates from matched energetic render/capture frames. The estimate is clamped to 0 to 250 ms and smoothed before it is used for the next render reference lookup.
+- Useful internal counters are `m_captureFramesProcessed`, `m_renderFramesPublished`, `m_aecFramesProcessed`, `m_aecFramesBypassedNoReference`, `m_aecFramesBypassedBadReference`, `m_rnnoiseFramesProcessed`, `m_lastReferenceDeltaQpc`, and `m_estimatedEchoDelayQpc`.
+- If `m_aecFramesBypassedNoReference` grows, the APO is not receiving render loopback reference frames. If `m_aecFramesBypassedBadReference` grows, render frames exist but are outside the delay window or were being written concurrently. If `m_aecFramesProcessed` is low while render and capture counters are high, focus on timestamp alignment and loopback registration before changing denoise settings.
