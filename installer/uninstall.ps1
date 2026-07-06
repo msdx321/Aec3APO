@@ -2,42 +2,99 @@ param(
     [string]$InfPath = (Join-Path $PSScriptRoot "aec3apo_component.inf"),
     [string]$ExtensionInfPath = (Join-Path $PSScriptRoot "aec3apo_extension.inf"),
     [switch]$Force,
-    [string]$DevconPath = "C:\Program Files (x86)\Windows Kits\10\Tools\10.0.26100.0\x64\devcon.exe",
+    [string]$DevconPath,
     [string]$CertSubject = "CN=AEC3APO Test",
     [ValidateSet("CurrentUser","LocalMachine")]
     [string]$TrustStore = "LocalMachine"
 )
 
-if (-not (Test-Path $DevconPath)) {
-    throw "devcon.exe not found: $DevconPath"
+function Test-Administrator {
+    $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
+    return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
-$infPaths = @($InfPath, $ExtensionInfPath) | Where-Object { $_ }
-$lines = & pnputil /enum-drivers
+function Resolve-OptionalDevcon {
+    param([string]$PreferredPath)
+
+    if ($PreferredPath -and (Test-Path -LiteralPath $PreferredPath)) {
+        return (Resolve-Path -LiteralPath $PreferredPath).Path
+    }
+
+    $command = Get-Command "devcon.exe" -ErrorAction SilentlyContinue
+    if ($command) {
+        return $command.Source
+    }
+
+    $kitRoots = @()
+    if (${env:ProgramFiles(x86)}) {
+        $kitRoots += Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10"
+    }
+    if ($env:ProgramFiles) {
+        $kitRoots += Join-Path $env:ProgramFiles "Windows Kits\10"
+    }
+    $kitRoots = $kitRoots | Where-Object { $_ -and (Test-Path -LiteralPath $_) }
+
+    foreach ($root in $kitRoots) {
+        $candidate = Get-ChildItem -Path $root -Recurse -Filter "devcon.exe" -ErrorAction SilentlyContinue |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+        if ($candidate) {
+            return $candidate.FullName
+        }
+    }
+
+    return $null
+}
+
+function Get-PublishedDriverNames {
+    param([string]$OriginalName)
+
+    $drivers = @()
+    $current = @{}
+    $lines = & pnputil /enum-drivers
+    foreach ($line in $lines) {
+        if ($line -match '^\s*$') {
+            if ($current.PublishedName -or $current.OriginalName) {
+                $drivers += New-Object psobject -Property $current
+            }
+            $current = @{}
+            continue
+        }
+
+        if ($line -match 'Published Name\s*:\s*(\S+)') {
+            $current.PublishedName = $Matches[1]
+            continue
+        }
+
+        if ($line -match 'Original Name\s*:\s*(\S+)') {
+            $current.OriginalName = $Matches[1]
+            continue
+        }
+    }
+
+    if ($current.PublishedName -or $current.OriginalName) {
+        $drivers += New-Object psobject -Property $current
+    }
+
+    $drivers |
+        Where-Object { $_.PublishedName -and $_.OriginalName -and $_.OriginalName.Equals($OriginalName, [System.StringComparison]::OrdinalIgnoreCase) } |
+        Select-Object -ExpandProperty PublishedName -Unique
+}
+
+if (-not (Test-Administrator)) {
+    throw "This script must be run in an elevated PowerShell to uninstall drivers and update certificate stores."
+}
+
+$infPaths = @($ExtensionInfPath, $InfPath) | Where-Object { $_ }
 
 foreach ($inf in $infPaths) {
-    if (-not (Test-Path $inf)) {
+    if (-not (Test-Path -LiteralPath $inf)) {
         Write-Host "INF not found: $inf"
         continue
     }
 
     $infName = Split-Path $inf -Leaf
-    $publishedNames = @()
-    $published = $null
-
-    foreach ($line in $lines) {
-        if ($line -match 'Published Name\s*:\s*(\S+)') {
-            $published = $Matches[1]
-            continue
-        }
-        if ($line -match 'Original Name\s*:\s*(\S+)') {
-            if ($published -and $Matches[1].Equals($infName, [System.StringComparison]::OrdinalIgnoreCase)) {
-                $publishedNames += $published
-            }
-        }
-    }
-
-    $publishedNames = $publishedNames | Select-Object -Unique
+    $publishedNames = @(Get-PublishedDriverNames -OriginalName $infName)
     if ($publishedNames.Count -eq 0) {
         Write-Host "No drivers found for $infName."
         continue
@@ -49,14 +106,20 @@ foreach ($inf in $infPaths) {
         } else {
             & pnputil /delete-driver $name /uninstall
         }
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to delete driver package $name for $infName."
+        }
     }
 }
 
-& $DevconPath remove "SWC\VEN_MSDX&AUDIO_EFFECTPACK_AECAPO"
-
-$principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
-if ($TrustStore -eq "LocalMachine" -and -not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    throw "This script must be run in an elevated PowerShell to remove certificates from LocalMachine."
+$resolvedDevcon = Resolve-OptionalDevcon -PreferredPath $DevconPath
+if ($resolvedDevcon) {
+    & $resolvedDevcon remove "SWC\VEN_MSDX&AUDIO_EFFECTPACK_AECAPO"
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning "devcon did not remove the SWC device. Driver packages were still processed."
+    }
+} else {
+    Write-Host "devcon.exe not found. Skipping explicit SWC device removal."
 }
 
 $storesToClean = @(
@@ -74,3 +137,6 @@ foreach ($entry in $storesToClean) {
     }
     $store.Close()
 }
+
+Restart-Service Audiosrv -Force
+Restart-Service AudioEndpointBuilder -Force

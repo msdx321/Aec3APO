@@ -5,7 +5,7 @@ ClassGuid   = {e2f84ce7-8efa-411c-aa69-97454ca4cb57}
 Provider    = %ProviderName%
 ExtensionId = {BFDC3303-1859-401A-AF29-E7EBB8638968}
 PnpLockDown = 1
-DriverVer   = 01/05/2026,1.1.0.0
+DriverVer = 07/06/2026,23.15.3.136
 CatalogFile = aec3apo.cat
 
 [Manufacturer]

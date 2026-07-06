@@ -5,7 +5,7 @@ Signature   = "$WINDOWS NT$"
 Class       = AudioProcessingObject
 ClassGuid   = {5989fce8-9cd0-467d-8a6a-5419e31529d4}
 Provider    = %ProviderName%
-DriverVer   = 01/05/2026,1.1.0.0
+DriverVer = 07/06/2026,23.15.3.102
 CatalogFile = aec3apo.cat
 PnpLockDown = 1
 
