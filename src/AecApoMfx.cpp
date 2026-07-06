@@ -51,7 +51,6 @@ namespace
     constexpr int kRnnoiseSampleRateHz = 48000;
     constexpr float kRnnoiseVadThreshold = 0.6f;
     constexpr int kRnnoiseVadGraceMs = 200;
-    constexpr float kRnnoiseVadLowConfidenceGain = 0.25f;
     constexpr float kRnnoisePcmScale = 32768.0f;
     constexpr float kRnnoisePcmInvScale = 1.0f / 32768.0f;
     constexpr size_t kMaxRealtimeScratchSamples = 48000;
@@ -521,8 +520,6 @@ void CAecApoMFX::ProcessRnnoiseFrame(std::vector<float> &captureFrameScratch, si
 
     if (rnnoiseReady)
     {
-        bool attenuateLowConfidenceSpeech = false;
-
         // AVX2-optimized PCM scale up
         AudioSampleConverter::SIMD::ScaleFloatArray_AVX2(
             m_rnnoiseInputScratch.data(),
@@ -543,18 +540,6 @@ void CAecApoMFX::ProcessRnnoiseFrame(std::vector<float> &captureFrameScratch, si
             {
                 m_rnnoiseVadGraceSamplesRemaining = 0;
             }
-        }
-        else
-        {
-            attenuateLowConfidenceSpeech = true;
-        }
-
-        if (attenuateLowConfidenceSpeech)
-        {
-            AudioSampleConverter::SIMD::ScaleFloatArray_AVX2(
-                m_rnnoiseOutputScratch.data(),
-                m_rnnoiseFrameSize,
-                kRnnoiseVadLowConfidenceGain);
         }
 
         // AVX2-optimized PCM scale down
