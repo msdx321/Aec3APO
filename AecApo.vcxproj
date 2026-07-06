@@ -98,9 +98,9 @@
       <PreprocessorDefinitions>%(PreprocessorDefinitions);_WINDLL;_USRDLL;UNICODE;_UNICODE</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);$(DDK_INC_PATH);include;src;.</AdditionalIncludeDirectories>
       <OutputDirectory>$(IntDir)</OutputDirectory>
-      <HeaderFile>$(IntDir)AecApoDll_h.h</HeaderFile>
-      <InterfaceIdentifierFile>$(IntDir)AecApoDll_i.c</InterfaceIdentifierFile>
-      <TypeLibraryName>$(IntDir)AecApoDll.tlb</TypeLibraryName>
+      <HeaderFileName>AecApoDll_h.h</HeaderFileName>
+      <InterfaceIdentifierFileName>AecApoDll_i.c</InterfaceIdentifierFileName>
+      <TypeLibraryName>AecApoDll.tlb</TypeLibraryName>
     </Midl>
     <ResourceCompile>
       <PreprocessorDefinitions>%(PreprocessorDefinitions);_WINDLL;_USRDLL;UNICODE;_UNICODE</PreprocessorDefinitions>
@@ -135,9 +135,9 @@ cmake --build "$(ProjectDir)build\speexdsp" --config $(Configuration)
       <PreprocessorDefinitions>%(PreprocessorDefinitions);_WINDLL;_USRDLL;UNICODE;_UNICODE</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);$(DDK_INC_PATH);include;src;.</AdditionalIncludeDirectories>
       <OutputDirectory>$(IntDir)</OutputDirectory>
-      <HeaderFile>$(IntDir)AecApoDll_h.h</HeaderFile>
-      <InterfaceIdentifierFile>$(IntDir)AecApoDll_i.c</InterfaceIdentifierFile>
-      <TypeLibraryName>$(IntDir)AecApoDll.tlb</TypeLibraryName>
+      <HeaderFileName>AecApoDll_h.h</HeaderFileName>
+      <InterfaceIdentifierFileName>AecApoDll_i.c</InterfaceIdentifierFileName>
+      <TypeLibraryName>AecApoDll.tlb</TypeLibraryName>
     </Midl>
     <ResourceCompile>
       <PreprocessorDefinitions>%(PreprocessorDefinitions);_WINDLL;_USRDLL;UNICODE;_UNICODE</PreprocessorDefinitions>
