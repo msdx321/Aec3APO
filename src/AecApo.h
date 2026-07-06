@@ -206,6 +206,14 @@ public:
     float m_loopbackEndpointMasterVolume = 0;
 
 private:
+    enum class ReferenceLookupStatus
+    {
+        kMatched,
+        kNoReference,
+        kOutOfWindow,
+        kConcurrentWrite
+    };
+
     // Helper methods for LockForProcess
     HRESULT ValidateAndSetupFormats(
         APO_CONNECTION_DESCRIPTOR **ppInputConnections,
@@ -218,7 +226,10 @@ private:
     UINT64 SamplesToQpcTicks(size_t sampleCount, int sampleRateHz) const;
     void QueueRenderReferenceSamples(const float *samples, size_t sampleCount, UINT64 firstSampleQpc);
     void PublishRenderReferenceFrame(const float *frameData, UINT64 frameStartQpc);
-    bool TryGetRenderReferenceFrame(UINT64 captureQpc, float *outFrame, size_t frameSize);
+    ReferenceLookupStatus TryGetRenderReferenceFrame(UINT64 captureQpc,
+                                                     float *outFrame,
+                                                     size_t frameSize,
+                                                     UINT64 *matchedReferenceQpc);
 
     // Helper method for APOProcess
     void ProcessSpeexFrame(std::vector<float> &captureFrameScratch, size_t frameSize, UINT64 captureQpc);

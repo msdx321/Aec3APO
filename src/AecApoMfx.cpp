@@ -365,17 +365,20 @@ void CAecApoMFX::QueueRenderReferenceSamples(const float *samples, size_t sample
     }
 }
 
-bool CAecApoMFX::TryGetRenderReferenceFrame(UINT64 captureQpc, float *outFrame, size_t frameSize)
+CAecApoMFX::ReferenceLookupStatus CAecApoMFX::TryGetRenderReferenceFrame(UINT64 captureQpc,
+                                                                         float *outFrame,
+                                                                         size_t frameSize,
+                                                                         UINT64 *matchedReferenceQpc)
 {
     if (outFrame == nullptr || frameSize != m_frameSize || m_renderReferenceSlotCount == 0 || !m_renderReferenceSequence)
     {
-        return false;
+        return ReferenceLookupStatus::kNoReference;
     }
 
     const uint64_t published = m_renderReferenceWriteCounter.load(std::memory_order_acquire);
     if (published == 0)
     {
-        return false;
+        return ReferenceLookupStatus::kNoReference;
     }
 
     UINT64 targetQpc = 0;
@@ -428,12 +431,22 @@ bool CAecApoMFX::TryGetRenderReferenceFrame(UINT64 captureQpc, float *outFrame, 
 
     if (!found || (targetQpc != 0 && bestDelta > toleranceQpc))
     {
-        return false;
+        return ReferenceLookupStatus::kOutOfWindow;
     }
 
     std::copy_n(m_renderReferenceRing.data() + (bestSlot * frameSize), frameSize, outFrame);
     const uint32_t endSequence = m_renderReferenceSequence[bestSlot].load(std::memory_order_acquire);
-    return endSequence == bestSequence && ((endSequence & 1u) == 0);
+    if (endSequence != bestSequence || ((endSequence & 1u) != 0))
+    {
+        return ReferenceLookupStatus::kConcurrentWrite;
+    }
+
+    if (matchedReferenceQpc != nullptr)
+    {
+        *matchedReferenceQpc = m_renderReferenceQpc[bestSlot];
+    }
+
+    return ReferenceLookupStatus::kMatched;
 }
 
 void CAecApoMFX::ProcessSpeexFrame(std::vector<float> &captureFrameScratch, size_t frameSize, UINT64 captureQpc)
@@ -448,8 +461,18 @@ void CAecApoMFX::ProcessSpeexFrame(std::vector<float> &captureFrameScratch, size
     std::vector<int16_t> &speexRef16 = m_speexRef16;
     std::vector<int16_t> &speexOut16 = m_speexOut16;
 
-    if (!TryGetRenderReferenceFrame(captureQpc, renderFrameScratch.data(), frameSize))
+    const ReferenceLookupStatus lookupStatus =
+        TryGetRenderReferenceFrame(captureQpc, renderFrameScratch.data(), frameSize, nullptr);
+    if (lookupStatus != ReferenceLookupStatus::kMatched)
     {
+        if (lookupStatus == ReferenceLookupStatus::kNoReference)
+        {
+            m_aecFramesBypassedNoReference.fetch_add(1, std::memory_order_relaxed);
+        }
+        else
+        {
+            m_aecFramesBypassedBadReference.fetch_add(1, std::memory_order_relaxed);
+        }
         return;
     }
 
@@ -468,6 +491,7 @@ void CAecApoMFX::ProcessSpeexFrame(std::vector<float> &captureFrameScratch, size
                             speexMic16.data(),
                             speexRef16.data(),
                             speexOut16.data());
+    m_aecFramesProcessed.fetch_add(1, std::memory_order_relaxed);
 
     if (m_speexPreprocessState)
     {
