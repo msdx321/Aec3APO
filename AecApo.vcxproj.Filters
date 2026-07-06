@@ -31,16 +31,16 @@
     <ClInclude Include="src\AecApoHsa.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="src\SampleConverter.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\SampleConverterSIMD.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="src\AecApo.png">
       <Filter>Resource Files</Filter>
-    </None>
-    <None Include="src\AecApoDll.cpp">
-      <Filter>Source Files</Filter>
-    </None>
-    <None Include="src\AecApoMfx.cpp">
-      <Filter>Source Files</Filter>
     </None>
     <None Include="src\AecApoDll.def">
       <Filter>Source Files</Filter>
@@ -51,6 +51,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="src\AecApoMFX.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\SampleConverterSIMD.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
