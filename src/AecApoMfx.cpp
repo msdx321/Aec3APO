@@ -326,6 +326,7 @@ void CAecApoMFX::PublishRenderReferenceFrame(const float *frameData, UINT64 fram
     m_renderReferenceQpc[slot] = frameStartQpc;
     m_renderReferenceSequence[slot].store(sequence + 2, std::memory_order_release);
     m_renderReferenceWriteCounter.store(frameId + 1, std::memory_order_release);
+    m_renderFramesPublished.fetch_add(1, std::memory_order_relaxed);
 }
 
 void CAecApoMFX::QueueRenderReferenceSamples(const float *samples, size_t sampleCount, UINT64 firstSampleQpc)
@@ -529,6 +530,7 @@ void CAecApoMFX::ProcessRnnoiseFrame(std::vector<float> &captureFrameScratch, si
         float vad = rnnoise_process_frame(m_rnnoiseState.get(),
                                           m_rnnoiseOutputScratch.data(),
                                           m_rnnoiseInputScratch.data());
+        m_rnnoiseFramesProcessed.fetch_add(1, std::memory_order_relaxed);
         if (vad >= kRnnoiseVadThreshold)
         {
             m_rnnoiseVadGraceSamplesRemaining = (kRnnoiseSampleRateHz * kRnnoiseVadGraceMs) / 1000;
@@ -655,6 +657,14 @@ void CAecApoMFX::InitializeProcessingBuffers()
         m_renderReferenceSequence.reset();
     }
     ResetRenderReferenceState();
+    m_captureFramesProcessed.store(0, std::memory_order_relaxed);
+    m_renderFramesPublished.store(0, std::memory_order_relaxed);
+    m_aecFramesProcessed.store(0, std::memory_order_relaxed);
+    m_aecFramesBypassedNoReference.store(0, std::memory_order_relaxed);
+    m_aecFramesBypassedBadReference.store(0, std::memory_order_relaxed);
+    m_rnnoiseFramesProcessed.store(0, std::memory_order_relaxed);
+    m_lastReferenceDeltaQpc.store(0, std::memory_order_relaxed);
+    m_estimatedEchoDelayQpc.store((m_qpcTicksPerSecond * 20) / 1000, std::memory_order_relaxed);
 }
 
 //
@@ -871,6 +881,7 @@ CAecApoMFX::APOProcess(
             {
                 const UINT64 captureFrameQpc = m_captureFifoStartQpc;
                 m_captureFifo.Pop(m_captureFrameScratch.data(), m_frameSize);
+                m_captureFramesProcessed.fetch_add(1, std::memory_order_relaxed);
                 ProcessSpeexFrame(m_captureFrameScratch, m_frameSize, captureFrameQpc);
                 ProcessRnnoiseFrame(m_captureFrameScratch, m_frameSize);
                 m_outputFifo.Push(m_captureFrameScratch.data(), m_frameSize);

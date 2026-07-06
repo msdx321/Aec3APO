@@ -254,6 +254,14 @@ private:
     std::vector<UINT64> m_renderReferenceQpc;
     std::unique_ptr<std::atomic<uint32_t>[]> m_renderReferenceSequence;
     std::atomic<uint64_t> m_renderReferenceWriteCounter{0};
+    std::atomic<uint64_t> m_captureFramesProcessed{0};
+    std::atomic<uint64_t> m_renderFramesPublished{0};
+    std::atomic<uint64_t> m_aecFramesProcessed{0};
+    std::atomic<uint64_t> m_aecFramesBypassedNoReference{0};
+    std::atomic<uint64_t> m_aecFramesBypassedBadReference{0};
+    std::atomic<uint64_t> m_rnnoiseFramesProcessed{0};
+    std::atomic<int64_t> m_lastReferenceDeltaQpc{0};
+    std::atomic<uint64_t> m_estimatedEchoDelayQpc{0};
     size_t m_renderReferenceSlotCount = 0;
     size_t m_renderAssemblyCount = 0;
     UINT64 m_renderAssemblyStartQpc = 0;
