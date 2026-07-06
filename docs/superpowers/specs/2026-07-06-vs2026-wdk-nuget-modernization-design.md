@@ -16,7 +16,7 @@ The active project compiles these source files:
 
 The repository also contains split implementation files such as `src/AecApoProcessing.cpp`, `src/AecApoAuxiliary.cpp`, `src/AecApoSystemEffects.cpp`, and `src/AecApoFormatUtils.cpp`. They are not compiled by the project and reference newer `m_runtime` state that is not declared by the active `src/AecApo.h`. These files are stale relative to the current build.
 
-The current Release x64 build succeeds under Visual Studio 18 and selects Windows SDK `10.0.28000.0`, but emits linker warning `LNK4098` because the APO uses dynamic CRT while the CMake-built static libraries use static CRT.
+The baseline Release x64 build under Visual Studio 18 selects Windows SDK `10.0.28000.0`, but emits linker warning `LNK4098` because the APO and CMake-built static libraries do not use the same effective CRT. Investigation showed that the WDK `WindowsApplicationForDrivers10.0` targets use a hybrid CRT path: the project file may request `MultiThreadedDLL`, but WDK rewrites the compile task to `MultiThreaded` unless `OverrideDefaultRuntimeLibrary` is set. Forcing `OverrideDefaultRuntimeLibrary=true` removes `LNK4098`, but WDK API validation then rejects imports from `vcruntime140.dll` and `msvcp140.dll`. The clean WDK path is therefore to align the helper libraries with the APO's effective static CRT.
 
 ## External Toolchain Target
 
@@ -32,7 +32,7 @@ Use CMake only for third-party static libraries:
 
 - `cmake/speexdsp/CMakeLists.txt` builds `speexdsp.lib`.
 - `cmake/rnnoise/CMakeLists.txt` builds `rnnoise.lib`.
-- Both CMake helper projects must use the same dynamic CRT flavor as `AecApo.vcxproj`.
+- Both CMake helper projects must use the same effective CRT flavor as the APO under `WindowsApplicationForDrivers10.0`.
 
 Add NuGet package metadata for the WDK path in the main native project where Visual Studio/MSBuild accepts it cleanly. If WDK NuGet package restore cannot be made reliable for this project type, document the installed WDK fallback and keep the project explicitly pinned to SDK build `10.0.28000.0`.
 
@@ -57,10 +57,10 @@ The project should explicitly target Windows SDK `10.0.28000.0` and keep:
 - C++20
 - warnings as errors for C++ compilation
 
-The third-party CMake helper libraries should use:
+The third-party CMake helper libraries should use the APO's effective WDK CRT settings:
 
-- Release: `MultiThreadedDLL`
-- Debug: `MultiThreadedDebugDLL`
+- Release: `MultiThreaded`
+- Debug: `MultiThreadedDebug`
 
 The goal is a warning-free link for the APO under both Debug and Release.
 

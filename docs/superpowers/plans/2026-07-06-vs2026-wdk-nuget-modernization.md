@@ -4,7 +4,7 @@
 
 **Goal:** Modernize Aec3Apo into a clean Visual Studio 2026 project that uses the current WDK path and removes stale project/source inconsistencies without changing APO behavior.
 
-**Architecture:** Keep MSBuild as the authoritative APO and WDK build entry point. Keep CMake only for SpeexDSP and RNNoise static libraries. Use WDK NuGet metadata where native MSBuild accepts it, while keeping the installed WDK `10.0.28000.0` path explicit and verifiable.
+**Architecture:** Keep MSBuild as the authoritative APO and WDK build entry point. Keep CMake only for SpeexDSP and RNNoise static libraries. Use WDK NuGet metadata where native MSBuild accepts it, while keeping the installed WDK `10.0.28000.0` path explicit and verifiable. Align third-party helper libraries with the APO's effective WDK CRT settings.
 
 **Tech Stack:** Visual Studio 2026/MSBuild 18, Windows SDK/WDK 28000, `Microsoft.Windows.WDK.x64` `10.0.28000.1839`, CMake 3.20+, C++20, ATL/COM, SpeexDSP, RNNoise.
 
@@ -17,6 +17,7 @@
 - Keep `ConfigurationType=DynamicLibrary`.
 - Keep C++20.
 - Keep warnings as errors for C++ compilation.
+- Align SpeexDSP and RNNoise to the APO's effective `WindowsApplicationForDrivers10.0` CRT settings: Release `MultiThreaded`, Debug `MultiThreadedDebug`.
 - Do not change APO processing behavior, COM identities, INF identities, installer signing behavior, RNNoise model data, or third-party source code.
 - Do not add tests for this pass; verify with builds and WDK tools.
 - The worktree has unrelated dirty files. Stage only files intentionally changed by this plan.
@@ -28,8 +29,8 @@
 - Modify `AecApo.sln`: update Visual Studio metadata from version 17 to version 18.
 - Modify `AecApo.vcxproj`: pin Windows SDK `10.0.28000.0`, add WDK NuGet package metadata, and keep x64 Debug/Release.
 - Modify `AecApo.vcxproj.Filters`: remove duplicate `None` entries for compiled `.cpp` files and list the actual compiled SIMD source/header cleanly.
-- Modify `cmake/speexdsp/CMakeLists.txt`: use dynamic CRT for the static helper library.
-- Modify `cmake/rnnoise/CMakeLists.txt`: use dynamic CRT for the static helper library.
+- Modify `cmake/speexdsp/CMakeLists.txt`: use the APO's effective WDK CRT setting for the static helper library.
+- Modify `cmake/rnnoise/CMakeLists.txt`: use the APO's effective WDK CRT setting for the static helper library.
 - Delete stale uncompiled source files:
   - `src/AecApoAuxiliary.cpp`
   - `src/AecApoFormatUtils.cpp`
@@ -111,15 +112,15 @@ If Step 4 requires fallback:
 & 'C:\Program Files\Git\cmd\git.exe' commit -m "build: target VS 2026 SDK 28000"
 ```
 
-### Task 2: Align Third-Party Helper Libraries with Dynamic CRT
+### Task 2: Align Third-Party Helper Libraries with WDK CRT
 
 **Files:**
 - Modify: `cmake/speexdsp/CMakeLists.txt`
 - Modify: `cmake/rnnoise/CMakeLists.txt`
 
 **Interfaces:**
-- Consumes: `AecApo.vcxproj` runtime library settings `MultiThreadedDLL` and `MultiThreadedDebugDLL`.
-- Produces: CMake helper projects that generate static libraries with the same dynamic CRT flavor as the APO.
+- Consumes: `AecApo.vcxproj` under WDK `WindowsApplicationForDrivers10.0`, which rewrites the effective compile runtime to `MultiThreaded`/`MultiThreadedDebug` unless `OverrideDefaultRuntimeLibrary` is set.
+- Produces: CMake helper projects that generate static libraries with the same effective WDK CRT flavor as the APO.
 
 - [ ] **Step 1: Update SpeexDSP runtime library**
 
@@ -127,7 +128,7 @@ In `cmake/speexdsp/CMakeLists.txt`, set the MSVC runtime property to:
 
 ```cmake
 if (MSVC)
-    set_property(TARGET speexdsp PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+    set_property(TARGET speexdsp PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif ()
 ```
 
@@ -139,7 +140,7 @@ In `cmake/rnnoise/CMakeLists.txt`, set the MSVC runtime property to:
 
 ```cmake
 if (MSVC)
-    set_property(TARGET rnnoise PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+    set_property(TARGET rnnoise PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif ()
 ```
 
