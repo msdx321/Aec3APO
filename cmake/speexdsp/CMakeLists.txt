@@ -32,7 +32,7 @@ configure_file(
 
 add_library(speexdsp STATIC ${SPEEXDSP_SOURCES})
 if (MSVC)
-    set_property(TARGET speexdsp PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+    set_property(TARGET speexdsp PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif ()
 target_include_directories(speexdsp
     PUBLIC

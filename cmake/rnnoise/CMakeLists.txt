@@ -23,7 +23,7 @@ set(RNNOISE_SOURCES
 
 add_library(rnnoise STATIC ${RNNOISE_SOURCES})
 if (MSVC)
-    set_property(TARGET rnnoise PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+    set_property(TARGET rnnoise PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif ()
 target_include_directories(rnnoise
     PUBLIC
