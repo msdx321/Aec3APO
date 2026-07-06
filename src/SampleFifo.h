@@ -19,7 +19,7 @@
 // Features:
 // - Fixed capacity circular buffering
 // - Lock-free thread-safe operations (SPSC pattern)
-// - Automatic overflow handling (drops oldest samples when full)
+// - Overflow-safe writes (drops incoming samples when full)
 // - Batch copy operations for improved performance
 // - Proper memory ordering for x64 and ARM64
 //
@@ -116,11 +116,20 @@ struct SampleFifo
 
         size_t currentWrite = write.load(std::memory_order_relaxed);
         size_t currentCount = count.load(std::memory_order_acquire);
-
-        if (samples > capacity - currentCount)
+        if (currentCount > capacity)
         {
-            size_t drop = samples - (capacity - currentCount);
-            currentCount -= drop;
+            currentCount = capacity;
+        }
+
+        size_t freeSpace = capacity - currentCount;
+        if (samples > freeSpace)
+        {
+            if (freeSpace == 0)
+            {
+                return;
+            }
+            data += (samples - freeSpace);
+            samples = freeSpace;
         }
 
         // Batch copy with wrap-around handling

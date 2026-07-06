@@ -208,16 +208,10 @@ namespace AudioSampleConverter
         }
         else
         {
-            // Extract first channel with SIMD
-            if (channels > 1)
+            // Extract first channel without heap allocation in the realtime path.
+            for (uint32_t frame = 0; frame < frames; ++frame)
             {
-                // Deinterleave first channel to temp buffer, then convert
-                std::vector<int32_t> temp(frames);
-                for (uint32_t frame = 0; frame < frames; ++frame)
-                {
-                    temp[frame] = in[frame * channels];
-                }
-                SIMD::ConvertInt32ToFloat_AVX2(temp.data(), out, frames, kInt32ScaleFactor);
+                out[frame] = ConverterTraits<int32_t>::ToFloat32(in[frame * channels]);
             }
         }
     }
@@ -231,16 +225,13 @@ namespace AudioSampleConverter
     {
         const int32_t *in = static_cast<const int32_t *>(input);
 
-        // AVX2 fast path for mono (channels == 1, no averaging needed)
+        // Mono PCM24-in-32 needs sign extension; keep it allocation-free.
         if (channels == 1)
         {
-            // Sign-extend 24-bit values, then convert with SIMD
-            std::vector<int32_t> temp(frames);
             for (uint32_t frame = 0; frame < frames; ++frame)
             {
-                temp[frame] = SignExtend24(in[frame]);
+                out[frame] = ConverterTraits<int32_t>::ToFloat24(SignExtend24(in[frame]));
             }
-            SIMD::ConvertInt32ToFloat_AVX2(temp.data(), out, frames, kInt24ScaleFactor);
             return;
         }
 
@@ -260,13 +251,11 @@ namespace AudioSampleConverter
         }
         else
         {
-            // Extract first channel
-            std::vector<int32_t> temp(frames);
+            // Extract first channel without heap allocation in the realtime path.
             for (uint32_t frame = 0; frame < frames; ++frame)
             {
-                temp[frame] = SignExtend24(in[frame * channels]);
+                out[frame] = ConverterTraits<int32_t>::ToFloat24(SignExtend24(in[frame * channels]));
             }
-            SIMD::ConvertInt32ToFloat_AVX2(temp.data(), out, frames, kInt24ScaleFactor);
         }
     }
 
@@ -288,13 +277,10 @@ namespace AudioSampleConverter
             return;
         }
 
-        // Multi-channel: convert to temp buffer, then replicate
-        std::vector<int32_t> temp(frames);
-        SIMD::ConvertFloatToInt32_AVX2(mono, temp.data(), frames, kInt32ScaleFactor);
-
+        // Multi-channel output is uncommon here; keep it scalar to avoid heap allocation.
         for (uint32_t frame = 0; frame < frames; ++frame)
         {
-            int32_t value = temp[frame];
+            int32_t value = ConverterTraits<int32_t>::FromFloat32(mono[frame]);
             int32_t *framePtr = out + (frame * channels);
             for (uint32_t ch = 0; ch < channels; ++ch)
             {
@@ -318,13 +304,10 @@ namespace AudioSampleConverter
             return;
         }
 
-        // Multi-channel: convert to temp buffer, then replicate
-        std::vector<int32_t> temp(frames);
-        SIMD::ConvertFloatToInt32_AVX2(mono, temp.data(), frames, kInt24ScaleFactor);
-
+        // Multi-channel output is uncommon here; keep it scalar to avoid heap allocation.
         for (uint32_t frame = 0; frame < frames; ++frame)
         {
-            int32_t value = temp[frame];
+            int32_t value = ConverterTraits<int32_t>::FromFloat24(mono[frame]);
             int32_t *framePtr = out + (frame * channels);
             for (uint32_t ch = 0; ch < channels; ++ch)
             {

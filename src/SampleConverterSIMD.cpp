@@ -27,8 +27,9 @@ namespace AudioSampleConverter
             const __m256 one = _mm256_set1_ps(1.0f);
             const __m256 neg_one = _mm256_set1_ps(-1.0f);
 
+            size_t i = 0;
             // Process in chunks of 16 samples
-            for (size_t i = 0; i < count; i += 16)
+            for (; i + 15 < count; i += 16)
             {
                 __m256 f0 = _mm256_loadu_ps(input + i);
                 __m256 f1 = _mm256_loadu_ps(input + i + 8);
@@ -52,6 +53,21 @@ namespace AudioSampleConverter
                 _mm_storeu_si128(reinterpret_cast<__m128i *>(output + i), packed0);
                 _mm_storeu_si128(reinterpret_cast<__m128i *>(output + i + 8), packed1);
             }
+
+            for (; i < count; ++i)
+            {
+                float v = input[i];
+                if (v > 1.0f)
+                    v = 1.0f;
+                if (v < -1.0f)
+                    v = -1.0f;
+                float scaled = v * 32768.0f;
+                if (scaled > 32767.0f)
+                    scaled = 32767.0f;
+                if (scaled < -32768.0f)
+                    scaled = -32768.0f;
+                output[i] = static_cast<int16_t>(scaled);
+            }
         }
 
         //
@@ -61,7 +77,8 @@ namespace AudioSampleConverter
         {
             const __m256 inv_scale = _mm256_set1_ps(1.0f / 32768.0f);
 
-            for (size_t i = 0; i < count; i += 16)
+            size_t i = 0;
+            for (; i + 15 < count; i += 16)
             {
                 __m128i i16_0 = _mm_loadu_si128(reinterpret_cast<const __m128i *>(input + i));
                 __m128i i16_1 = _mm_loadu_si128(reinterpret_cast<const __m128i *>(input + i + 8));
@@ -77,6 +94,11 @@ namespace AudioSampleConverter
                 _mm256_storeu_ps(output + i, f0);
                 _mm256_storeu_ps(output + i + 8, f1);
             }
+
+            for (; i < count; ++i)
+            {
+                output[i] = static_cast<float>(input[i]) * (1.0f / 32768.0f);
+            }
         }
 
         //
@@ -86,11 +108,17 @@ namespace AudioSampleConverter
         {
             const __m256 scale = _mm256_set1_ps(scale_factor);
 
-            for (size_t i = 0; i < count; i += 8)
+            size_t i = 0;
+            for (; i + 7 < count; i += 8)
             {
                 __m256 v = _mm256_loadu_ps(data + i);
                 v = _mm256_mul_ps(v, scale);
                 _mm256_storeu_ps(data + i, v);
+            }
+
+            for (; i < count; ++i)
+            {
+                data[i] *= scale_factor;
             }
         }
 
@@ -101,7 +129,8 @@ namespace AudioSampleConverter
         {
             const __m256 half = _mm256_set1_ps(0.5f);
 
-            for (size_t i = 0; i < frames; i += 4)
+            size_t i = 0;
+            for (; i + 3 < frames; i += 4)
             {
                 // Load 8 floats: [L0 R0 L1 R1 L2 R2 L3 R3]
                 __m256 stereo = _mm256_loadu_ps(input + i * 2);
@@ -123,6 +152,11 @@ namespace AudioSampleConverter
                 output[i + 2] = temp_out[4];
                 output[i + 3] = temp_out[5];
             }
+
+            for (; i < frames; ++i)
+            {
+                output[i] = (input[i * 2] + input[i * 2 + 1]) * 0.5f;
+            }
         }
 
         //
@@ -130,7 +164,8 @@ namespace AudioSampleConverter
         //
         void WriteMonoToStereo_Float_AVX2(const float *input, float *output, size_t frames)
         {
-            for (size_t i = 0; i < frames; i += 4)
+            size_t i = 0;
+            for (; i + 3 < frames; i += 4)
             {
                 __m128 mono = _mm_loadu_ps(input + i);
                 __m128 stereo_lo = _mm_unpacklo_ps(mono, mono);
@@ -138,6 +173,12 @@ namespace AudioSampleConverter
 
                 _mm_storeu_ps(output + i * 2, stereo_lo);
                 _mm_storeu_ps(output + i * 2 + 4, stereo_hi);
+            }
+
+            for (; i < frames; ++i)
+            {
+                output[i * 2] = input[i];
+                output[i * 2 + 1] = input[i];
             }
         }
 
@@ -152,7 +193,8 @@ namespace AudioSampleConverter
             const __m256 one = _mm256_set1_ps(1.0f);
             const __m256 neg_one = _mm256_set1_ps(-1.0f);
 
-            for (size_t i = 0; i < count; i += 8)
+            size_t i = 0;
+            for (; i + 7 < count; i += 8)
             {
                 __m256 f = _mm256_loadu_ps(input + i);
 
@@ -165,6 +207,21 @@ namespace AudioSampleConverter
                 __m256i i32 = _mm256_cvtps_epi32(f);
                 _mm256_storeu_si256(reinterpret_cast<__m256i *>(output + i), i32);
             }
+
+            for (; i < count; ++i)
+            {
+                float v = input[i];
+                if (v > 1.0f)
+                    v = 1.0f;
+                if (v < -1.0f)
+                    v = -1.0f;
+                float scaled = v * scale_factor;
+                if (scaled > scale_factor - 1.0f)
+                    scaled = scale_factor - 1.0f;
+                if (scaled < -scale_factor)
+                    scaled = -scale_factor;
+                output[i] = static_cast<int32_t>(scaled);
+            }
         }
 
         //
@@ -174,11 +231,17 @@ namespace AudioSampleConverter
         {
             const __m256 inv_scale = _mm256_set1_ps(1.0f / scale_factor);
 
-            for (size_t i = 0; i < count; i += 8)
+            size_t i = 0;
+            for (; i + 7 < count; i += 8)
             {
                 __m256i i32 = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(input + i));
                 __m256 f = _mm256_mul_ps(_mm256_cvtepi32_ps(i32), inv_scale);
                 _mm256_storeu_ps(output + i, f);
+            }
+
+            for (; i < count; ++i)
+            {
+                output[i] = static_cast<float>(input[i]) / scale_factor;
             }
         }
 
