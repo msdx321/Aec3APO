@@ -10,8 +10,8 @@ param(
     [string]$PfxPassword,
     [string]$CertSubject = "CN=AEC3APO Test",
     [string]$TimestampUrl = "http://timestamp.digicert.com",
-    [string]$Inf2CatPath = "C:\\Program Files (x86)\\Windows Kits\\10\\bin\\10.0.26100.0\\x86\\Inf2Cat.exe",
-    [string]$SignToolPath = "C:\\Program Files (x86)\\Windows Kits\\10\\bin\\10.0.26100.0\\x64\\signtool.exe",
+    [string]$Inf2CatPath = "C:\\Program Files (x86)\\Windows Kits\\10\\bin\\10.0.28000.0\\x86\\Inf2Cat.exe",
+    [string]$SignToolPath = "C:\\Program Files (x86)\\Windows Kits\\10\\bin\\10.0.28000.0\\x64\\signtool.exe",
     [ValidateSet("CurrentUser","LocalMachine")]
     [string]$TrustStore = "LocalMachine",
     [string]$EndpointId
@@ -102,7 +102,7 @@ $catPath = Join-Path $DriverDir "aec3apo.cat"
 if (Test-Path $catPath) {
     Remove-Item -LiteralPath $catPath -Force
 }
-& $inf2cat /driver:$DriverDir /os:10_X64 | Write-Host
+& $inf2cat /driver:$DriverDir /os:10_GE_X64 | Write-Host
 
 if (-not (Test-Path $catPath)) {
     throw "Catalog not generated: $catPath"
