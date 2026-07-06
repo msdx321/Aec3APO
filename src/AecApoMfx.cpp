@@ -306,6 +306,56 @@ void CAecApoMFX::ResetRenderReferenceState()
     std::fill(m_renderReferenceQpc.begin(), m_renderReferenceQpc.end(), 0);
 }
 
+void CAecApoMFX::ProcessCaptureFrame(const float *frameData, UINT64 captureFrameQpc)
+{
+    if (frameData == nullptr || m_frameSize == 0 || m_captureFrameScratch.size() < m_frameSize)
+    {
+        return;
+    }
+
+    std::copy_n(frameData, m_frameSize, m_captureFrameScratch.data());
+    m_captureFramesProcessed.fetch_add(1, std::memory_order_relaxed);
+    ProcessSpeexFrame(m_captureFrameScratch, m_frameSize, captureFrameQpc);
+    ProcessRnnoiseFrame(m_captureFrameScratch, m_frameSize);
+    m_outputFifo.Push(m_captureFrameScratch.data(), m_frameSize);
+}
+
+void CAecApoMFX::QueueCaptureSamples(const float *samples, size_t sampleCount, UINT64 firstSampleQpc)
+{
+    if (samples == nullptr || sampleCount == 0 || m_frameSize == 0 || m_captureAssemblyScratch.size() < m_frameSize)
+    {
+        return;
+    }
+
+    UINT64 currentSampleQpc = firstSampleQpc;
+    while (sampleCount > 0)
+    {
+        if (m_captureAssemblyCount == 0)
+        {
+            m_captureAssemblyStartQpc = currentSampleQpc;
+        }
+
+        const size_t remaining = m_frameSize - m_captureAssemblyCount;
+        const size_t chunk = (std::min)(sampleCount, remaining);
+        std::copy_n(samples, chunk, m_captureAssemblyScratch.data() + m_captureAssemblyCount);
+
+        m_captureAssemblyCount += chunk;
+        samples += chunk;
+        sampleCount -= chunk;
+        if (currentSampleQpc != 0)
+        {
+            currentSampleQpc += SamplesToQpcTicks(chunk, m_sampleRateHz);
+        }
+
+        if (m_captureAssemblyCount == m_frameSize)
+        {
+            ProcessCaptureFrame(m_captureAssemblyScratch.data(), m_captureAssemblyStartQpc);
+            m_captureAssemblyCount = 0;
+            m_captureAssemblyStartQpc = 0;
+        }
+    }
+}
+
 void CAecApoMFX::PublishRenderReferenceFrame(const float *frameData, UINT64 frameStartQpc)
 {
     if (frameData == nullptr || m_frameSize == 0 || m_renderReferenceSlotCount == 0 || !m_renderReferenceSequence)
@@ -646,7 +696,6 @@ Exit:
 //
 void CAecApoMFX::InitializeProcessingBuffers()
 {
-    m_captureFifo.Init(static_cast<size_t>(m_sampleRateHz));
     m_outputFifo.Init(static_cast<size_t>(m_sampleRateHz));
 
     // Pre-allocate scratch buffers to maximum expected size to avoid real-time allocations
@@ -657,7 +706,9 @@ void CAecApoMFX::InitializeProcessingBuffers()
     m_captureFrameScratch.assign(m_frameSize, 0.0f);
     m_speexRenderFrameScratch.assign(m_frameSize, 0.0f);
     m_renderAssemblyScratch.assign(m_frameSize, 0.0f);
-    m_captureFifoStartQpc = 0;
+    m_captureAssemblyScratch.assign(m_frameSize, 0.0f);
+    m_captureAssemblyCount = 0;
+    m_captureAssemblyStartQpc = 0;
 
     LARGE_INTEGER qpcFrequency = {};
     if (QueryPerformanceFrequency(&qpcFrequency))
@@ -894,26 +945,7 @@ CAecApoMFX::APOProcess(
         }
         else
         {
-            if (m_captureFifo.Count() == 0)
-            {
-                m_captureFifoStartQpc = inputQpc;
-            }
-            m_captureFifo.Push(m_captureScratch.data(), frames);
-
-            // Process full 10 ms blocks through AEC then RNNoise
-            while (m_captureFifo.Count() >= m_frameSize)
-            {
-                const UINT64 captureFrameQpc = m_captureFifoStartQpc;
-                m_captureFifo.Pop(m_captureFrameScratch.data(), m_frameSize);
-                m_captureFramesProcessed.fetch_add(1, std::memory_order_relaxed);
-                ProcessSpeexFrame(m_captureFrameScratch, m_frameSize, captureFrameQpc);
-                ProcessRnnoiseFrame(m_captureFrameScratch, m_frameSize);
-                m_outputFifo.Push(m_captureFrameScratch.data(), m_frameSize);
-                if (m_captureFifoStartQpc != 0)
-                {
-                    m_captureFifoStartQpc += SamplesToQpcTicks(m_frameSize, m_sampleRateHz);
-                }
-            }
+            QueueCaptureSamples(m_captureScratch.data(), frames, inputQpc);
 
             // Emit processed samples; if not enough yet, fall back to input.
             size_t produced = m_outputFifo.Pop(m_outputScratch.data(), frames);

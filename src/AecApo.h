@@ -224,6 +224,8 @@ private:
     void InitializeRnnoiseProcessors();
     void ResetRenderReferenceState();
     UINT64 SamplesToQpcTicks(size_t sampleCount, int sampleRateHz) const;
+    void QueueCaptureSamples(const float *samples, size_t sampleCount, UINT64 firstSampleQpc);
+    void ProcessCaptureFrame(const float *frameData, UINT64 captureFrameQpc);
     void QueueRenderReferenceSamples(const float *samples, size_t sampleCount, UINT64 firstSampleQpc);
     void PublishRenderReferenceFrame(const float *frameData, UINT64 frameStartQpc);
     ReferenceLookupStatus TryGetRenderReferenceFrame(UINT64 captureQpc,
@@ -236,11 +238,11 @@ private:
     void ProcessRnnoiseFrame(std::vector<float> &captureFrameScratch, size_t frameSize);
 
     CComPtr<IAudioProcessingObjectLoggingService> m_apoLoggingService;
-    SampleFifo m_captureFifo;
     SampleFifo m_outputFifo;
     std::vector<float> m_renderScratch;
     std::vector<float> m_renderResampledScratch;
     std::vector<float> m_renderAssemblyScratch;
+    std::vector<float> m_captureAssemblyScratch;
     std::vector<float> m_speexRenderFrameScratch;
     std::vector<float> m_captureScratch;
     std::vector<float> m_captureFrameScratch;
@@ -275,8 +277,9 @@ private:
     std::atomic<uint64_t> m_estimatedEchoDelayQpc{0};
     size_t m_renderReferenceSlotCount = 0;
     size_t m_renderAssemblyCount = 0;
+    size_t m_captureAssemblyCount = 0;
     UINT64 m_renderAssemblyStartQpc = 0;
-    UINT64 m_captureFifoStartQpc = 0;
+    UINT64 m_captureAssemblyStartQpc = 0;
     UINT64 m_qpcTicksPerSecond = 0;
 };
 #pragma AVRT_VTABLES_END
