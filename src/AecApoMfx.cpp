@@ -334,9 +334,6 @@ static GUID GetFormatSubtype(AecSampleFormat format)
                : KSDATAFORMAT_SUBTYPE_PCM;
 }
 
-// Use AudioSampleConverter namespace for all conversion operations
-using namespace AudioSampleConverter;
-
 static void ExtractMonoSamples(const void *input,
                                AecSampleFormat format,
                                UINT32 frames,
@@ -359,25 +356,35 @@ static void ExtractMonoSamples(const void *input,
     switch (format)
     {
     case AecSampleFormat::kFloat32:
-        ExtractMonoSamplesTyped<float>(input, frames, channels, averageChannels,
-                                       ConverterTraits<float>::ToFloat, out);
+        AudioSampleConverter::ExtractMonoSamplesTyped<float>(
+            input,
+            frames,
+            channels,
+            averageChannels,
+            AudioSampleConverter::ConverterTraits<float>::ToFloat,
+            out);
         break;
 
     case AecSampleFormat::kPcm16:
-        ExtractMonoSamplesTyped<int16_t>(input, frames, channels, averageChannels,
-                                         ConverterTraits<int16_t>::ToFloat, out);
+        AudioSampleConverter::ExtractMonoSamplesTyped<int16_t>(
+            input,
+            frames,
+            channels,
+            averageChannels,
+            AudioSampleConverter::ConverterTraits<int16_t>::ToFloat,
+            out);
         break;
 
     case AecSampleFormat::kPcm24Packed:
-        ExtractMonoSamplesPcm24Packed(input, frames, channels, averageChannels, out);
+        AudioSampleConverter::ExtractMonoSamplesPcm24Packed(input, frames, channels, averageChannels, out);
         break;
 
     case AecSampleFormat::kPcm24In32:
-        ExtractMonoSamplesInt32_PCM24In32(input, frames, channels, averageChannels, out);
+        AudioSampleConverter::ExtractMonoSamplesInt32_PCM24In32(input, frames, channels, averageChannels, out);
         break;
 
     case AecSampleFormat::kPcm32:
-        ExtractMonoSamplesInt32_PCM32(input, frames, channels, averageChannels, out);
+        AudioSampleConverter::ExtractMonoSamplesInt32_PCM32(input, frames, channels, averageChannels, out);
         break;
 
     default:
@@ -400,25 +407,33 @@ static void WriteMonoSamples(void *output,
     switch (format)
     {
     case AecSampleFormat::kFloat32:
-        WriteMonoSamplesTyped<float>(output, frames, channels,
-                                     ConverterTraits<float>::FromFloat, mono);
+        AudioSampleConverter::WriteMonoSamplesTyped<float>(
+            output,
+            frames,
+            channels,
+            AudioSampleConverter::ConverterTraits<float>::FromFloat,
+            mono);
         break;
 
     case AecSampleFormat::kPcm16:
-        WriteMonoSamplesTyped<int16_t>(output, frames, channels,
-                                       ConverterTraits<int16_t>::FromFloat, mono);
+        AudioSampleConverter::WriteMonoSamplesTyped<int16_t>(
+            output,
+            frames,
+            channels,
+            AudioSampleConverter::ConverterTraits<int16_t>::FromFloat,
+            mono);
         break;
 
     case AecSampleFormat::kPcm24Packed:
-        WriteMonoSamplesPcm24Packed(output, frames, channels, mono);
+        AudioSampleConverter::WriteMonoSamplesPcm24Packed(output, frames, channels, mono);
         break;
 
     case AecSampleFormat::kPcm24In32:
-        WriteMonoSamplesInt32_PCM24In32(output, frames, channels, mono);
+        AudioSampleConverter::WriteMonoSamplesInt32_PCM24In32(output, frames, channels, mono);
         break;
 
     case AecSampleFormat::kPcm32:
-        WriteMonoSamplesInt32_PCM32(output, frames, channels, mono);
+        AudioSampleConverter::WriteMonoSamplesInt32_PCM32(output, frames, channels, mono);
         break;
 
     default:
