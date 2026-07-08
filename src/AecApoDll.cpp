@@ -9,11 +9,7 @@
 
 #include <atlbase.h>
 #include <atlcom.h>
-#include <atlcoll.h>
-#include <atlsync.h>
-#include <mmreg.h>
 #include <windows.h>
-#include <strsafe.h>
 #include "resource.h"
 #include "AecApoDll_h.h"
 #include <AecApo.h>
