@@ -159,21 +159,18 @@ struct SampleFifo
         const size_t currentRead = read.load(std::memory_order_acquire);
         const size_t used = UsedSamples(currentRead, currentWrite, capacity);
         const size_t freeSpace = capacity - used;
-        if (samples > freeSpace)
+        const size_t writable = (std::min)(samples, freeSpace);
+        if (writable == 0)
         {
-            if (freeSpace == 0)
-            {
-                return;
-            }
-            data += (samples - freeSpace);
-            samples = freeSpace;
+            return;
         }
+        data += samples - writable;
 
         // Batch copy with wrap-around handling
         const size_t writeOffset = currentWrite % capacity;
-        CopyIntoCircularBuffer(buffer.data(), capacity, writeOffset, data, samples);
+        CopyIntoCircularBuffer(buffer.data(), capacity, writeOffset, data, writable);
 
-        write.store(currentWrite + samples, std::memory_order_release);
+        write.store(currentWrite + writable, std::memory_order_release);
     }
 
     // Consumer only
