@@ -42,21 +42,12 @@ namespace AudioSampleConverter
 
     inline float ClampUnitSample(float v)
     {
-        if (v > 1.0f)
-            return 1.0f;
-        if (v < -1.0f)
-            return -1.0f;
-        return v;
+        return (std::clamp)(v, -1.0f, 1.0f);
     }
 
     inline float ScaleAndClampSample(float v, float scaleFactor, float minValue, float maxValue)
     {
-        float scaled = ClampUnitSample(v) * scaleFactor;
-        if (scaled > maxValue)
-            return maxValue;
-        if (scaled < minValue)
-            return minValue;
-        return scaled;
+        return (std::clamp)(ClampUnitSample(v) * scaleFactor, minValue, maxValue);
     }
 
     //
