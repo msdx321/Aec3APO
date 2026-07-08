@@ -1108,27 +1108,27 @@ CAecApoMFX::APOProcess(
     UNREFERENCED_PARAMETER(u32NumInputConnections);
     UNREFERENCED_PARAMETER(u32NumOutputConnections);
 
-    const void *inputBuffer = nullptr;
-    void *outputBuffer = nullptr;
-
     ATLASSERT(m_bIsLocked);
 
-    // assert that the number of input and output connectins fits our registration properties
+    // assert that the number of input and output connections fits our registration properties
     ATLASSERT(m_pRegProperties->u32MinInputConnections <= u32NumInputConnections);
     ATLASSERT(m_pRegProperties->u32MaxInputConnections >= u32NumInputConnections);
     ATLASSERT(m_pRegProperties->u32MinOutputConnections <= u32NumOutputConnections);
     ATLASSERT(m_pRegProperties->u32MaxOutputConnections >= u32NumOutputConnections);
 
-    ATLASSERT(ppInputConnections[0]->u32Signature == APO_CONNECTION_PROPERTY_V2_SIGNATURE);
-    ATLASSERT(ppOutputConnections[0]->u32Signature == APO_CONNECTION_PROPERTY_V2_SIGNATURE);
+    const APO_CONNECTION_PROPERTY *inputConnection = ppInputConnections[0];
+    APO_CONNECTION_PROPERTY *outputConnection = ppOutputConnections[0];
 
-    const APO_CONNECTION_PROPERTY_V2 *inConnection =
-        (ppInputConnections[0]->u32Signature == APO_CONNECTION_PROPERTY_V2_SIGNATURE)
-            ? reinterpret_cast<const APO_CONNECTION_PROPERTY_V2 *>(ppInputConnections[0])
+    ATLASSERT(inputConnection->u32Signature == APO_CONNECTION_PROPERTY_V2_SIGNATURE);
+    ATLASSERT(outputConnection->u32Signature == APO_CONNECTION_PROPERTY_V2_SIGNATURE);
+
+    const APO_CONNECTION_PROPERTY_V2 *inputConnectionV2 =
+        (inputConnection->u32Signature == APO_CONNECTION_PROPERTY_V2_SIGNATURE)
+            ? reinterpret_cast<const APO_CONNECTION_PROPERTY_V2 *>(inputConnection)
             : nullptr;
 
     // check APO_BUFFER_FLAGS.
-    switch (ppInputConnections[0]->u32BufferFlags)
+    switch (inputConnection->u32BufferFlags)
     {
     case BUFFER_INVALID:
     {
@@ -1138,17 +1138,17 @@ CAecApoMFX::APOProcess(
     case BUFFER_VALID:
     case BUFFER_SILENT:
     {
-        inputBuffer = reinterpret_cast<const void *>(ppInputConnections[0]->pBuffer);
-        outputBuffer = reinterpret_cast<void *>(ppOutputConnections[0]->pBuffer);
+        const void *inputBuffer = reinterpret_cast<const void *>(inputConnection->pBuffer);
+        void *outputBuffer = reinterpret_cast<void *>(outputConnection->pBuffer);
 
-        UINT32 frames = ppInputConnections[0]->u32ValidFrameCount;
-        bool inputSilent = (ppInputConnections[0]->u32BufferFlags == BUFFER_SILENT);
-        UINT64 inputQpc = (inConnection != nullptr) ? inConnection->u64QPCTime : 0;
-        APO_BUFFER_FLAGS outputBufferFlags = ppInputConnections[0]->u32BufferFlags;
+        const UINT32 frames = inputConnection->u32ValidFrameCount;
+        const bool inputSilent = (inputConnection->u32BufferFlags == BUFFER_SILENT);
+        const UINT64 inputQpc = (inputConnectionV2 != nullptr) ? inputConnectionV2->u64QPCTime : 0;
+        APO_BUFFER_FLAGS outputBufferFlags = inputConnection->u32BufferFlags;
 
         if (!HasRealtimeScratchCapacity(frames))
         {
-            WriteSilentOutput(ppOutputConnections[0], outputBuffer, frames);
+            WriteSilentOutput(outputConnection, outputBuffer, frames);
             break;
         }
 
@@ -1170,8 +1170,8 @@ CAecApoMFX::APOProcess(
         }
 
         // Set the valid frame count.
-        ppOutputConnections[0]->u32ValidFrameCount = ppInputConnections[0]->u32ValidFrameCount;
-        ppOutputConnections[0]->u32BufferFlags = outputBufferFlags;
+        outputConnection->u32ValidFrameCount = frames;
+        outputConnection->u32BufferFlags = outputBufferFlags;
 
         break;
     }
