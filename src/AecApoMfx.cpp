@@ -1376,6 +1376,11 @@ STDMETHODIMP CAecApoMFX::GetEffectsList(_Outptr_result_buffer_maybenull_(*pcEffe
 {
     UNREFERENCED_PARAMETER(Event);
 
+    if (ppEffectsIds == nullptr || pcEffects == nullptr)
+    {
+        return E_POINTER;
+    }
+
     *ppEffectsIds = nullptr;
     *pcEffects = 0;
 
