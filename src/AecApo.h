@@ -206,6 +206,7 @@ private:
     void InitializeSpeexProcessors();
     void InitializeRenderReferenceProcessors();
     void InitializeRnnoiseProcessors();
+    void ResetProcessingCounters();
     void ResetRenderReferenceState();
     UINT64 SamplesToQpcTicks(size_t sampleCount, int sampleRateHz) const;
     void QueueCaptureSamples(const float *samples, size_t sampleCount, UINT64 firstSampleQpc);
@@ -220,6 +221,9 @@ private:
 
     // Helper method for APOProcess
     void ProcessSpeexFrame(std::vector<float> &captureFrameScratch, size_t frameSize, UINT64 captureQpc);
+    bool PrepareRnnoiseInput(std::vector<float> &captureFrameScratch, size_t frameSize);
+    void RunRnnoiseFrame();
+    void CopyRnnoiseOutputToCapture(std::vector<float> &captureFrameScratch, size_t frameSize);
     void ProcessRnnoiseFrame(std::vector<float> &captureFrameScratch, size_t frameSize);
 
     CComPtr<IAudioProcessingObjectLoggingService> m_apoLoggingService;

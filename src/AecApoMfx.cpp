@@ -37,6 +37,11 @@ CAecApoMFX::~CAecApoMFX()
     // RAII unique_ptr handles cleanup automatically
 }
 
+static AecSampleFormat GetAecSampleFormat(const UNCOMPRESSEDAUDIOFORMAT &format);
+static UINT32 GetBytesPerSample(AecSampleFormat format);
+static UINT32 GetValidBitsPerSample(AecSampleFormat format);
+static GUID GetFormatSubtype(AecSampleFormat format);
+
 namespace
 {
     constexpr int kDefaultSampleRateHz = 48000;
@@ -60,6 +65,7 @@ namespace
     constexpr int kRenderReferenceToleranceMs = 120;
     constexpr int kDelayUpdateSmoothingShift = 3;
     constexpr float kDelayEstimatorEnergyFloor = 1.0e-5f;
+    const GUID kAecEffects[] = {AUDIO_EFFECT_TYPE_ACOUSTIC_ECHO_CANCELLATION};
 
     static bool IsSupportedAecSampleRate(float rate_hz)
     {
@@ -98,6 +104,60 @@ namespace
         }
 
         return static_cast<float>(sum / static_cast<double>(sampleCount));
+    }
+
+    struct RequestedFormatInfo
+    {
+        float sampleRate = static_cast<float>(kDefaultSampleRateHz);
+        AecSampleFormat sampleFormat = AecSampleFormat::kUnknown;
+        UINT32 channelCount = 1;
+    };
+
+    static AecSampleFormat ResolvePreferredSampleFormat(AecSampleFormat requestedFormat)
+    {
+        return (requestedFormat != AecSampleFormat::kUnknown)
+                   ? requestedFormat
+                   : AecSampleFormat::kFloat32;
+    }
+
+    static UNCOMPRESSEDAUDIOFORMAT CreatePreferredUncompressedFormat(
+        UINT32 channelCount,
+        float requestedSampleRate,
+        AecSampleFormat requestedFormat)
+    {
+        const AecSampleFormat formatType = ResolvePreferredSampleFormat(requestedFormat);
+
+        UNCOMPRESSEDAUDIOFORMAT format = {};
+        format.guidFormatType = GetFormatSubtype(formatType);
+        format.dwSamplesPerFrame = channelCount;
+        format.dwBytesPerSampleContainer = GetBytesPerSample(formatType);
+        format.dwValidBitsPerSample = GetValidBitsPerSample(formatType);
+        format.fFramesPerSecond = static_cast<float>(GetClosestSupportedSampleRate(requestedSampleRate));
+        format.dwChannelMask = KSAUDIO_SPEAKER_DIRECTOUT;
+        return format;
+    }
+
+    static RequestedFormatInfo GetRequestedFormatInfo(IAudioMediaType *mediaType)
+    {
+        RequestedFormatInfo info = {};
+        if (mediaType == nullptr)
+        {
+            return info;
+        }
+
+        if (const WAVEFORMATEX *audioFormat = mediaType->GetAudioFormat())
+        {
+            info.channelCount = audioFormat->nChannels;
+        }
+
+        UNCOMPRESSEDAUDIOFORMAT uncompressedFormat = {};
+        if (SUCCEEDED(mediaType->GetUncompressedAudioFormat(&uncompressedFormat)))
+        {
+            info.sampleRate = uncompressedFormat.fFramesPerSecond;
+            info.sampleFormat = GetAecSampleFormat(uncompressedFormat);
+        }
+
+        return info;
     }
 } // namespace
 
@@ -322,6 +382,17 @@ void CAecApoMFX::ResetRenderReferenceState()
 
     std::fill(m_renderReferenceQpc.begin(), m_renderReferenceQpc.end(), 0);
     std::fill(m_renderReferenceEnergy.begin(), m_renderReferenceEnergy.end(), 0.0f);
+}
+
+void CAecApoMFX::ResetProcessingCounters()
+{
+    m_captureFramesProcessed.store(0, std::memory_order_relaxed);
+    m_renderFramesPublished.store(0, std::memory_order_relaxed);
+    m_aecFramesProcessed.store(0, std::memory_order_relaxed);
+    m_aecFramesBypassedNoReference.store(0, std::memory_order_relaxed);
+    m_aecFramesBypassedBadReference.store(0, std::memory_order_relaxed);
+    m_rnnoiseFramesProcessed.store(0, std::memory_order_relaxed);
+    m_lastReferenceDeltaQpc.store(0, std::memory_order_relaxed);
 }
 
 void CAecApoMFX::ProcessCaptureFrame(const float *frameData, UINT64 captureFrameQpc)
@@ -612,20 +683,14 @@ void CAecApoMFX::ProcessSpeexFrame(std::vector<float> &captureFrameScratch, size
         frameSize);
 }
 
-void CAecApoMFX::ProcessRnnoiseFrame(std::vector<float> &captureFrameScratch, size_t frameSize)
+bool CAecApoMFX::PrepareRnnoiseInput(std::vector<float> &captureFrameScratch, size_t frameSize)
 {
-    if (!m_rnnoiseState || m_rnnoiseFrameSize <= 0)
-    {
-        return;
-    }
-
     if (m_rnnoiseInputScratch.size() < static_cast<size_t>(m_rnnoiseFrameSize) ||
         m_rnnoiseOutputScratch.size() < static_cast<size_t>(m_rnnoiseFrameSize))
     {
-        return;
+        return false;
     }
 
-    bool rnnoiseReady = false;
     if (m_rnnoiseResamplerIn && m_rnnoiseResamplerOut)
     {
         spx_uint32_t inLen = static_cast<spx_uint32_t>(frameSize);
@@ -640,49 +705,55 @@ void CAecApoMFX::ProcessRnnoiseFrame(std::vector<float> &captureFrameScratch, si
         {
             std::fill(m_rnnoiseInputScratch.begin() + outLen, m_rnnoiseInputScratch.end(), 0.0f);
         }
-        rnnoiseReady = true;
+        return true;
     }
-    else if (frameSize == static_cast<size_t>(m_rnnoiseFrameSize))
+
+    if (frameSize != static_cast<size_t>(m_rnnoiseFrameSize))
     {
-        std::copy(captureFrameScratch.begin(),
-                  captureFrameScratch.begin() + frameSize,
-                  m_rnnoiseInputScratch.begin());
-        rnnoiseReady = true;
+        return false;
     }
 
-    if (rnnoiseReady)
+    std::copy(captureFrameScratch.begin(),
+              captureFrameScratch.begin() + frameSize,
+              m_rnnoiseInputScratch.begin());
+    return true;
+}
+
+void CAecApoMFX::RunRnnoiseFrame()
+{
+    // AVX2-optimized PCM scale up
+    AudioSampleConverter::SIMD::ScaleFloatArray_AVX2(
+        m_rnnoiseInputScratch.data(),
+        m_rnnoiseFrameSize,
+        kRnnoisePcmScale);
+
+    float vad = rnnoise_process_frame(m_rnnoiseState.get(),
+                                      m_rnnoiseOutputScratch.data(),
+                                      m_rnnoiseInputScratch.data());
+    m_rnnoiseFramesProcessed.fetch_add(1, std::memory_order_relaxed);
+    if (vad >= kRnnoiseVadThreshold)
     {
-        // AVX2-optimized PCM scale up
-        AudioSampleConverter::SIMD::ScaleFloatArray_AVX2(
-            m_rnnoiseInputScratch.data(),
-            m_rnnoiseFrameSize,
-            kRnnoisePcmScale);
-
-        float vad = rnnoise_process_frame(m_rnnoiseState.get(),
-                                          m_rnnoiseOutputScratch.data(),
-                                          m_rnnoiseInputScratch.data());
-        m_rnnoiseFramesProcessed.fetch_add(1, std::memory_order_relaxed);
-        if (vad >= kRnnoiseVadThreshold)
+        m_rnnoiseVadGraceSamplesRemaining = (kRnnoiseSampleRateHz * kRnnoiseVadGraceMs) / 1000;
+    }
+    else if (m_rnnoiseVadGraceSamplesRemaining > 0)
+    {
+        m_rnnoiseVadGraceSamplesRemaining -= m_rnnoiseFrameSize;
+        if (m_rnnoiseVadGraceSamplesRemaining < 0)
         {
-            m_rnnoiseVadGraceSamplesRemaining = (kRnnoiseSampleRateHz * kRnnoiseVadGraceMs) / 1000;
+            m_rnnoiseVadGraceSamplesRemaining = 0;
         }
-        else if (m_rnnoiseVadGraceSamplesRemaining > 0)
-        {
-            m_rnnoiseVadGraceSamplesRemaining -= m_rnnoiseFrameSize;
-            if (m_rnnoiseVadGraceSamplesRemaining < 0)
-            {
-                m_rnnoiseVadGraceSamplesRemaining = 0;
-            }
-        }
-
-        // AVX2-optimized PCM scale down
-        AudioSampleConverter::SIMD::ScaleFloatArray_AVX2(
-            m_rnnoiseOutputScratch.data(),
-            m_rnnoiseFrameSize,
-            kRnnoisePcmInvScale);
     }
 
-    if (rnnoiseReady && m_rnnoiseResamplerIn && m_rnnoiseResamplerOut)
+    // AVX2-optimized PCM scale down
+    AudioSampleConverter::SIMD::ScaleFloatArray_AVX2(
+        m_rnnoiseOutputScratch.data(),
+        m_rnnoiseFrameSize,
+        kRnnoisePcmInvScale);
+}
+
+void CAecApoMFX::CopyRnnoiseOutputToCapture(std::vector<float> &captureFrameScratch, size_t frameSize)
+{
+    if (m_rnnoiseResamplerIn && m_rnnoiseResamplerOut)
     {
         spx_uint32_t inLen = static_cast<spx_uint32_t>(m_rnnoiseFrameSize);
         spx_uint32_t outLen = static_cast<spx_uint32_t>(frameSize);
@@ -697,12 +768,28 @@ void CAecApoMFX::ProcessRnnoiseFrame(std::vector<float> &captureFrameScratch, si
             std::fill(captureFrameScratch.begin() + outLen, captureFrameScratch.end(), 0.0f);
         }
     }
-    else if (rnnoiseReady)
+    else
     {
         std::copy(m_rnnoiseOutputScratch.begin(),
                   m_rnnoiseOutputScratch.begin() + frameSize,
                   captureFrameScratch.begin());
     }
+}
+
+void CAecApoMFX::ProcessRnnoiseFrame(std::vector<float> &captureFrameScratch, size_t frameSize)
+{
+    if (!m_rnnoiseState || m_rnnoiseFrameSize <= 0)
+    {
+        return;
+    }
+
+    if (!PrepareRnnoiseInput(captureFrameScratch, frameSize))
+    {
+        return;
+    }
+
+    RunRnnoiseFrame();
+    CopyRnnoiseOutputToCapture(captureFrameScratch, frameSize);
 }
 
 //
@@ -790,13 +877,7 @@ void CAecApoMFX::InitializeProcessingBuffers()
         m_renderReferenceSequence.reset();
     }
     ResetRenderReferenceState();
-    m_captureFramesProcessed.store(0, std::memory_order_relaxed);
-    m_renderFramesPublished.store(0, std::memory_order_relaxed);
-    m_aecFramesProcessed.store(0, std::memory_order_relaxed);
-    m_aecFramesBypassedNoReference.store(0, std::memory_order_relaxed);
-    m_aecFramesBypassedBadReference.store(0, std::memory_order_relaxed);
-    m_rnnoiseFramesProcessed.store(0, std::memory_order_relaxed);
-    m_lastReferenceDeltaQpc.store(0, std::memory_order_relaxed);
+    ResetProcessingCounters();
     m_estimatedEchoDelayQpc.store((m_qpcTicksPerSecond * kInitialEchoDelayMs) / 1000, std::memory_order_relaxed);
 }
 
@@ -1244,15 +1325,13 @@ STDMETHODIMP CAecApoMFX::GetEffectsList(_Outptr_result_buffer_maybenull_(*pcEffe
     if (m_audioSignalProcessingMode == AUDIO_SIGNALPROCESSINGMODE_COMMUNICATIONS)
     {
         // Return the list of effects implemented by this APO for COMMUNICATIONS processing mode
-        static const GUID effectsList[] = {AUDIO_EFFECT_TYPE_ACOUSTIC_ECHO_CANCELLATION};
-
-        *ppEffectsIds = static_cast<LPGUID>(CoTaskMemAlloc(sizeof(effectsList)));
+        *ppEffectsIds = static_cast<LPGUID>(CoTaskMemAlloc(sizeof(kAecEffects)));
         if (!*ppEffectsIds)
         {
             return E_OUTOFMEMORY;
         }
-        *pcEffects = ARRAYSIZE(effectsList);
-        CopyMemory(*ppEffectsIds, effectsList, sizeof(effectsList));
+        *pcEffects = ARRAYSIZE(kAecEffects);
+        CopyMemory(*ppEffectsIds, kAecEffects, sizeof(kAecEffects));
     }
 
     return S_OK;
@@ -1273,23 +1352,21 @@ STDMETHODIMP CAecApoMFX::GetControllableSystemEffectsList(_Outptr_result_buffer_
     if (m_audioSignalProcessingMode == AUDIO_SIGNALPROCESSINGMODE_COMMUNICATIONS)
     {
         // Return the list of effects implemented by this APO for COMMUNICATIONS processing mode
-        static const GUID effectsList[] = {AUDIO_EFFECT_TYPE_ACOUSTIC_ECHO_CANCELLATION};
-
         AUDIO_SYSTEMEFFECT *audioEffects = static_cast<AUDIO_SYSTEMEFFECT *>(
-            CoTaskMemAlloc(ARRAYSIZE(effectsList) * sizeof(AUDIO_SYSTEMEFFECT)));
+            CoTaskMemAlloc(ARRAYSIZE(kAecEffects) * sizeof(AUDIO_SYSTEMEFFECT)));
         if (audioEffects == nullptr)
         {
             return E_OUTOFMEMORY;
         }
 
-        for (UINT i = 0; i < ARRAYSIZE(effectsList); i++)
+        for (UINT i = 0; i < ARRAYSIZE(kAecEffects); i++)
         {
-            audioEffects[i].id = effectsList[i];
+            audioEffects[i].id = kAecEffects[i];
             audioEffects[i].state = AUDIO_SYSTEMEFFECT_STATE_ON;
             audioEffects[i].canSetState = FALSE;
         }
 
-        *numEffects = ARRAYSIZE(effectsList);
+        *numEffects = ARRAYSIZE(kAecEffects);
         *effects = audioEffects;
     }
 
@@ -1353,25 +1430,16 @@ CreatePreferredInputMediaType(IAudioMediaType **ppMediaType,
 {
     ASSERT_NONREALTIME();
 
-    AecSampleFormat formatType = (requestedFormat != AecSampleFormat::kUnknown)
-                                     ? requestedFormat
-                                     : AecSampleFormat::kFloat32;
-    float sampleRate = static_cast<float>(GetClosestSupportedSampleRate(requestedSampleRate));
-    UNCOMPRESSEDAUDIOFORMAT format = {};
-    format.guidFormatType = GetFormatSubtype(formatType);
-    format.dwSamplesPerFrame = 1;
-    format.dwBytesPerSampleContainer = GetBytesPerSample(formatType);
-    format.dwValidBitsPerSample = GetValidBitsPerSample(formatType);
-    format.fFramesPerSecond = sampleRate;
-    format.dwChannelMask = KSAUDIO_SPEAKER_DIRECTOUT;
+    UINT32 channelCount = 1;
 
     // Match the channel count of the input if it is less than 16
     if (requestedInputChannelCount <= kMaxInputChannels)
     {
-        format.dwSamplesPerFrame = requestedInputChannelCount;
-        format.dwChannelMask = KSAUDIO_SPEAKER_DIRECTOUT;
+        channelCount = requestedInputChannelCount;
     }
 
+    UNCOMPRESSEDAUDIOFORMAT format =
+        CreatePreferredUncompressedFormat(channelCount, requestedSampleRate, requestedFormat);
     return CreateAudioMediaTypeFromUncompressedAudioFormat(&format, ppMediaType);
 }
 
@@ -1382,18 +1450,8 @@ CreatePreferredOutputMediaType(IAudioMediaType **ppMediaType,
 {
     ASSERT_NONREALTIME();
 
-    AecSampleFormat formatType = (requestedFormat != AecSampleFormat::kUnknown)
-                                     ? requestedFormat
-                                     : AecSampleFormat::kFloat32;
-    float sampleRate = static_cast<float>(GetClosestSupportedSampleRate(requestedSampleRate));
-    UNCOMPRESSEDAUDIOFORMAT format = {};
-    format.guidFormatType = GetFormatSubtype(formatType);
-    format.dwSamplesPerFrame = 1;
-    format.dwBytesPerSampleContainer = GetBytesPerSample(formatType);
-    format.dwValidBitsPerSample = GetValidBitsPerSample(formatType);
-    format.fFramesPerSecond = sampleRate;
-    format.dwChannelMask = KSAUDIO_SPEAKER_DIRECTOUT;
-
+    UNCOMPRESSEDAUDIOFORMAT format =
+        CreatePreferredUncompressedFormat(1, requestedSampleRate, requestedFormat);
     return CreateAudioMediaTypeFromUncompressedAudioFormat(&format, ppMediaType);
 }
 
@@ -1450,18 +1508,11 @@ STDMETHODIMP CAecApoMFX::IsInputFormatSupported(IAudioMediaType *pOutputFormat, 
 
     if (!bSupported)
     {
-        UNCOMPRESSEDAUDIOFORMAT requestedFormat = {};
-        float requestedRate = static_cast<float>(kDefaultSampleRateHz);
-        AecSampleFormat requestedSampleFormat = AecSampleFormat::kUnknown;
-        if (SUCCEEDED(pRequestedInputFormat->GetUncompressedAudioFormat(&requestedFormat)))
-        {
-            requestedRate = requestedFormat.fFramesPerSecond;
-            requestedSampleFormat = GetAecSampleFormat(requestedFormat);
-        }
+        const RequestedFormatInfo requestedInfo = GetRequestedFormatInfo(pRequestedInputFormat);
         hResult = CreatePreferredInputMediaType(ppSupportedInputFormat,
-                                                pRequestedInputFormat->GetAudioFormat()->nChannels,
-                                                requestedRate,
-                                                requestedSampleFormat);
+                                                requestedInfo.channelCount,
+                                                requestedInfo.sampleRate,
+                                                requestedInfo.sampleFormat);
         IF_FAILED_JUMP(hResult, Exit);
         return S_FALSE;
     }
@@ -1517,17 +1568,10 @@ STDMETHODIMP CAecApoMFX::IsOutputFormatSupported(IAudioMediaType *pInputFormat, 
 
     if (!bSupported)
     {
-        UNCOMPRESSEDAUDIOFORMAT requestedFormat = {};
-        float requestedRate = static_cast<float>(kDefaultSampleRateHz);
-        AecSampleFormat requestedSampleFormat = AecSampleFormat::kUnknown;
-        if (SUCCEEDED(pRequestedOutputFormat->GetUncompressedAudioFormat(&requestedFormat)))
-        {
-            requestedRate = requestedFormat.fFramesPerSecond;
-            requestedSampleFormat = GetAecSampleFormat(requestedFormat);
-        }
+        const RequestedFormatInfo requestedInfo = GetRequestedFormatInfo(pRequestedOutputFormat);
         hResult = CreatePreferredOutputMediaType(ppSupportedOutputFormat,
-                                                 requestedRate,
-                                                 requestedSampleFormat);
+                                                 requestedInfo.sampleRate,
+                                                 requestedInfo.sampleFormat);
         IF_FAILED_JUMP(hResult, Exit);
         return S_FALSE;
     }
@@ -1649,18 +1693,11 @@ CAecApoMFX::IsInputFormatSupported(IAudioMediaType *pRequestedInputFormat,
 
     if (!bSupported)
     {
-        UNCOMPRESSEDAUDIOFORMAT requestedFormat = {};
-        float requestedRate = static_cast<float>(kDefaultSampleRateHz);
-        AecSampleFormat requestedSampleFormat = AecSampleFormat::kUnknown;
-        if (SUCCEEDED(pRequestedInputFormat->GetUncompressedAudioFormat(&requestedFormat)))
-        {
-            requestedRate = requestedFormat.fFramesPerSecond;
-            requestedSampleFormat = GetAecSampleFormat(requestedFormat);
-        }
+        const RequestedFormatInfo requestedInfo = GetRequestedFormatInfo(pRequestedInputFormat);
         hResult = CreatePreferredInputMediaType(ppSupportedInputFormat,
-                                                pRequestedInputFormat->GetAudioFormat()->nChannels,
-                                                requestedRate,
-                                                requestedSampleFormat);
+                                                requestedInfo.channelCount,
+                                                requestedInfo.sampleRate,
+                                                requestedInfo.sampleFormat);
         IF_FAILED_JUMP(hResult, Exit);
         return S_FALSE;
     }
