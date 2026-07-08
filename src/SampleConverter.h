@@ -165,6 +165,55 @@ namespace AudioSampleConverter
         return (value << 8) >> 8;
     }
 
+    template <typename ConvertFunc>
+    inline void ExtractMonoSamplesInt32Scalar(
+        const int32_t *input,
+        uint32_t frames,
+        uint32_t channels,
+        bool averageChannels,
+        ConvertFunc toFloat,
+        float *out)
+    {
+        if (averageChannels && channels > 1)
+        {
+            for (uint32_t frame = 0; frame < frames; ++frame)
+            {
+                const int32_t *framePtr = input + (frame * channels);
+                float sum = 0.0f;
+                for (uint32_t ch = 0; ch < channels; ++ch)
+                {
+                    sum += toFloat(framePtr[ch]);
+                }
+                out[frame] = sum / static_cast<float>(channels);
+            }
+            return;
+        }
+
+        for (uint32_t frame = 0; frame < frames; ++frame)
+        {
+            out[frame] = toFloat(input[frame * channels]);
+        }
+    }
+
+    template <typename ConvertFunc>
+    inline void WriteMonoSamplesInt32Scalar(
+        int32_t *output,
+        uint32_t frames,
+        uint32_t channels,
+        const float *mono,
+        ConvertFunc fromFloat)
+    {
+        for (uint32_t frame = 0; frame < frames; ++frame)
+        {
+            const int32_t value = fromFloat(mono[frame]);
+            int32_t *framePtr = output + (frame * channels);
+            for (uint32_t ch = 0; ch < channels; ++ch)
+            {
+                framePtr[ch] = value;
+            }
+        }
+    }
+
     //
     // Specialized extraction for Int32 formats with SIMD
     //
@@ -184,28 +233,13 @@ namespace AudioSampleConverter
             return;
         }
 
-        // Fall back to scalar for multi-channel
-        if (averageChannels && channels > 1)
-        {
-            for (uint32_t frame = 0; frame < frames; ++frame)
-            {
-                const int32_t *framePtr = in + (frame * channels);
-                float sum = 0.0f;
-                for (uint32_t ch = 0; ch < channels; ++ch)
-                {
-                    sum += ConverterTraits<int32_t>::ToFloat32(framePtr[ch]);
-                }
-                out[frame] = sum / static_cast<float>(channels);
-            }
-        }
-        else
-        {
-            // Extract first channel without heap allocation in the realtime path.
-            for (uint32_t frame = 0; frame < frames; ++frame)
-            {
-                out[frame] = ConverterTraits<int32_t>::ToFloat32(in[frame * channels]);
-            }
-        }
+        ExtractMonoSamplesInt32Scalar(
+            in,
+            frames,
+            channels,
+            averageChannels,
+            ConverterTraits<int32_t>::ToFloat32,
+            out);
     }
 
     inline void ExtractMonoSamplesInt32_PCM24In32(
@@ -217,38 +251,16 @@ namespace AudioSampleConverter
     {
         const int32_t *in = static_cast<const int32_t *>(input);
 
-        // Mono PCM24-in-32 needs sign extension; keep it allocation-free.
-        if (channels == 1)
-        {
-            for (uint32_t frame = 0; frame < frames; ++frame)
+        ExtractMonoSamplesInt32Scalar(
+            in,
+            frames,
+            channels,
+            averageChannels,
+            [](int32_t sample)
             {
-                out[frame] = ConverterTraits<int32_t>::ToFloat24(SignExtend24(in[frame]));
-            }
-            return;
-        }
-
-        // Fall back to scalar for multi-channel
-        if (averageChannels && channels > 1)
-        {
-            for (uint32_t frame = 0; frame < frames; ++frame)
-            {
-                const int32_t *framePtr = in + (frame * channels);
-                float sum = 0.0f;
-                for (uint32_t ch = 0; ch < channels; ++ch)
-                {
-                    sum += ConverterTraits<int32_t>::ToFloat24(SignExtend24(framePtr[ch]));
-                }
-                out[frame] = sum / static_cast<float>(channels);
-            }
-        }
-        else
-        {
-            // Extract first channel without heap allocation in the realtime path.
-            for (uint32_t frame = 0; frame < frames; ++frame)
-            {
-                out[frame] = ConverterTraits<int32_t>::ToFloat24(SignExtend24(in[frame * channels]));
-            }
-        }
+                return ConverterTraits<int32_t>::ToFloat24(SignExtend24(sample));
+            },
+            out);
     }
 
     //
@@ -269,16 +281,7 @@ namespace AudioSampleConverter
             return;
         }
 
-        // Multi-channel output is uncommon here; keep it scalar to avoid heap allocation.
-        for (uint32_t frame = 0; frame < frames; ++frame)
-        {
-            int32_t value = ConverterTraits<int32_t>::FromFloat32(mono[frame]);
-            int32_t *framePtr = out + (frame * channels);
-            for (uint32_t ch = 0; ch < channels; ++ch)
-            {
-                framePtr[ch] = value;
-            }
-        }
+        WriteMonoSamplesInt32Scalar(out, frames, channels, mono, ConverterTraits<int32_t>::FromFloat32);
     }
 
     inline void WriteMonoSamplesInt32_PCM24In32(
@@ -296,16 +299,7 @@ namespace AudioSampleConverter
             return;
         }
 
-        // Multi-channel output is uncommon here; keep it scalar to avoid heap allocation.
-        for (uint32_t frame = 0; frame < frames; ++frame)
-        {
-            int32_t value = ConverterTraits<int32_t>::FromFloat24(mono[frame]);
-            int32_t *framePtr = out + (frame * channels);
-            for (uint32_t ch = 0; ch < channels; ++ch)
-            {
-                framePtr[ch] = value;
-            }
-        }
+        WriteMonoSamplesInt32Scalar(out, frames, channels, mono, ConverterTraits<int32_t>::FromFloat24);
     }
 
     //
