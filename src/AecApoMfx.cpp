@@ -1307,13 +1307,9 @@ HRESULT CAecApoMFX::Initialize(UINT32 cbDataSize, BYTE *pbyData)
         // pbyData contains APOInitSystemEffects3 structure describing the microphone endpoint
         //
         APOInitSystemEffects3 *papoSysFxInit3 = reinterpret_cast<APOInitSystemEffects3 *>(pbyData);
-        m_initializedForEffectsDiscovery = papoSysFxInit3->InitializeForDiscoveryOnly;
 
         // Support for all processing modes; log when not COMMUNICATIONS.
         m_audioSignalProcessingMode = papoSysFxInit3->AudioProcessingMode;
-
-        // Register for notification of endpoint volume change in GetApoNotificationRegistrationInfo
-        // Keep a reference to the device that will be registering for endpoint volume notifcations.
 
         IF_TRUE_ACTION_JUMP(papoSysFxInit3->pDeviceCollection == nullptr, hr = E_INVALIDARG, Exit);
         // Get the endpoint on which this APO has been created. It is the last device in the device collection.
@@ -1322,7 +1318,8 @@ HRESULT CAecApoMFX::Initialize(UINT32 cbDataSize, BYTE *pbyData)
         IF_FAILED_JUMP(hr, Exit);
         IF_TRUE_ACTION_JUMP(numDevices <= 0, hr = E_INVALIDARG, Exit);
 
-        hr = papoSysFxInit3->pDeviceCollection->Item(numDevices - 1, &m_spCaptureDevice);
+        CComPtr<IMMDevice> captureDevice;
+        hr = papoSysFxInit3->pDeviceCollection->Item(numDevices - 1, &captureDevice);
         IF_FAILED_JUMP(hr, Exit);
 
         m_bIsInitialized = true;
@@ -1339,7 +1336,6 @@ HRESULT CAecApoMFX::Initialize(UINT32 cbDataSize, BYTE *pbyData)
         // pbyData contains APOInitSystemEffects2 structure describing the microphone endpoint
         //
         APOInitSystemEffects2 *papoSysFxInit2 = reinterpret_cast<APOInitSystemEffects2 *>(pbyData);
-        m_initializedForEffectsDiscovery = papoSysFxInit2->InitializeForDiscoveryOnly;
 
         // Support for all processing modes; log when not COMMUNICATIONS.
         m_audioSignalProcessingMode = papoSysFxInit2->AudioProcessingMode;

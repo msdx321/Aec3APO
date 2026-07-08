@@ -166,7 +166,6 @@ public:
 public:
     UINT64 m_auxiliaryInputId = 0;
     static const CRegAPOProperties<1> sm_RegProperties; // registration properties
-    BOOL m_initializedForEffectsDiscovery = FALSE;
     GUID m_audioSignalProcessingMode = GUID_NULL;
     UINT32 m_inputSamplesPerFrame = 0;
     UINT32 m_renderSamplesPerFrame = 0;
@@ -177,7 +176,6 @@ public:
     AecSampleFormat m_outputSampleFormat = AecSampleFormat::kUnknown;
     AecSampleFormat m_renderSampleFormat = AecSampleFormat::kUnknown;
 
-    CComPtr<IMMDevice> m_spCaptureDevice;
     CComPtr<IMMDevice> m_spLoopbackDevice;
 
 private:
