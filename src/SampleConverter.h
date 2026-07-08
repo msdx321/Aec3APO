@@ -179,10 +179,7 @@ namespace AudioSampleConverter
         {
             const int32_t value = fromFloat(mono[frame]);
             int32_t *framePtr = output + (frame * channels);
-            for (uint32_t ch = 0; ch < channels; ++ch)
-            {
-                framePtr[ch] = value;
-            }
+            std::fill_n(framePtr, channels, value);
         }
     }
 
