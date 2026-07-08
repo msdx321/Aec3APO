@@ -225,7 +225,7 @@ namespace
             return E_OUTOFMEMORY;
         }
 
-        CopyMemory(copiedEffects, effectIds, byteCount);
+        std::copy_n(effectIds, effectCount, copiedEffects);
         *outputEffects = copiedEffects;
         *outputCount = effectCount;
         return S_OK;
