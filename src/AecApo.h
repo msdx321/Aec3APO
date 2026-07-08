@@ -180,9 +180,6 @@ public:
     CComPtr<IMMDevice> m_spCaptureDevice;
     CComPtr<IMMDevice> m_spLoopbackDevice;
 
-    float m_captureEndpointMasterVolume = 0;
-    float m_loopbackEndpointMasterVolume = 0;
-
 private:
     enum class ReferenceLookupStatus
     {
