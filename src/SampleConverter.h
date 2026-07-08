@@ -137,6 +137,17 @@ namespace AudioSampleConverter
         dst[2] = static_cast<uint8_t>((value >> 16) & 0xFF);
     }
 
+    template <typename T, typename ConvertFunc>
+    inline float AverageInterleavedFrame(const T *framePtr, uint32_t channels, const ConvertFunc &toFloat)
+    {
+        float sum = 0.0f;
+        for (uint32_t ch = 0; ch < channels; ++ch)
+        {
+            sum += toFloat(framePtr[ch]);
+        }
+        return sum / static_cast<float>(channels);
+    }
+
     template <typename ConvertFunc>
     inline void ExtractMonoSamplesInt32Scalar(
         const int32_t *input,
@@ -151,12 +162,7 @@ namespace AudioSampleConverter
             for (uint32_t frame = 0; frame < frames; ++frame)
             {
                 const int32_t *framePtr = input + (frame * channels);
-                float sum = 0.0f;
-                for (uint32_t ch = 0; ch < channels; ++ch)
-                {
-                    sum += toFloat(framePtr[ch]);
-                }
-                out[frame] = sum / static_cast<float>(channels);
+                out[frame] = AverageInterleavedFrame(framePtr, channels, toFloat);
             }
             return;
         }
@@ -311,12 +317,7 @@ namespace AudioSampleConverter
             for (uint32_t frame = 0; frame < frames; ++frame)
             {
                 const T *framePtr = in + (frame * channels);
-                float sum = 0.0f;
-                for (uint32_t ch = 0; ch < channels; ++ch)
-                {
-                    sum += toFloat(framePtr[ch]);
-                }
-                out[frame] = sum / static_cast<float>(channels);
+                out[frame] = AverageInterleavedFrame(framePtr, channels, toFloat);
             }
         }
         else
