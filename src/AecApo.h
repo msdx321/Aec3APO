@@ -197,7 +197,6 @@ private:
     void InitializeSpeexProcessors();
     void InitializeRenderReferenceProcessors();
     void InitializeRnnoiseProcessors();
-    void ResetProcessingCounters();
     void ResetRenderReferenceState();
     UINT64 SamplesToQpcTicks(size_t sampleCount, int sampleRateHz) const;
     void QueueCaptureSamples(const float *samples, size_t sampleCount, UINT64 firstSampleQpc);
@@ -254,13 +253,6 @@ private:
     std::vector<float> m_renderReferenceEnergy;
     std::unique_ptr<std::atomic<uint32_t>[]> m_renderReferenceSequence;
     std::atomic<uint64_t> m_renderReferenceWriteCounter{0};
-    std::atomic<uint64_t> m_captureFramesProcessed{0};
-    std::atomic<uint64_t> m_renderFramesPublished{0};
-    std::atomic<uint64_t> m_aecFramesProcessed{0};
-    std::atomic<uint64_t> m_aecFramesBypassedNoReference{0};
-    std::atomic<uint64_t> m_aecFramesBypassedBadReference{0};
-    std::atomic<uint64_t> m_rnnoiseFramesProcessed{0};
-    std::atomic<int64_t> m_lastReferenceDeltaQpc{0};
     std::atomic<uint64_t> m_estimatedEchoDelayQpc{0};
     size_t m_renderReferenceSlotCount = 0;
     size_t m_renderAssemblyCount = 0;

@@ -490,17 +490,6 @@ void CAecApoMFX::ResetRenderReferenceState()
     std::fill(m_renderReferenceEnergy.begin(), m_renderReferenceEnergy.end(), 0.0f);
 }
 
-void CAecApoMFX::ResetProcessingCounters()
-{
-    m_captureFramesProcessed.store(0, std::memory_order_relaxed);
-    m_renderFramesPublished.store(0, std::memory_order_relaxed);
-    m_aecFramesProcessed.store(0, std::memory_order_relaxed);
-    m_aecFramesBypassedNoReference.store(0, std::memory_order_relaxed);
-    m_aecFramesBypassedBadReference.store(0, std::memory_order_relaxed);
-    m_rnnoiseFramesProcessed.store(0, std::memory_order_relaxed);
-    m_lastReferenceDeltaQpc.store(0, std::memory_order_relaxed);
-}
-
 void CAecApoMFX::ProcessCaptureFrame(const float *frameData, UINT64 captureFrameQpc)
 {
     if (frameData == nullptr || m_frameSize == 0 || m_captureFrameScratch.size() < m_frameSize)
@@ -509,7 +498,6 @@ void CAecApoMFX::ProcessCaptureFrame(const float *frameData, UINT64 captureFrame
     }
 
     std::copy_n(frameData, m_frameSize, m_captureFrameScratch.data());
-    m_captureFramesProcessed.fetch_add(1, std::memory_order_relaxed);
     ProcessSpeexFrame(m_captureFrameScratch, m_frameSize, captureFrameQpc);
     ProcessRnnoiseFrame(m_captureFrameScratch, m_frameSize);
     m_outputFifo.Push(m_captureFrameScratch.data(), m_frameSize);
@@ -556,7 +544,6 @@ void CAecApoMFX::PublishRenderReferenceFrame(const float *frameData, UINT64 fram
     m_renderReferenceEnergy[slot] = ComputeMeanSquareEnergy(frameData, m_frameSize);
     m_renderReferenceSequence[slot].store(sequence + 2, std::memory_order_release);
     m_renderReferenceWriteCounter.store(frameId + 1, std::memory_order_release);
-    m_renderFramesPublished.fetch_add(1, std::memory_order_relaxed);
 }
 
 void CAecApoMFX::QueueRenderReferenceSamples(const float *samples, size_t sampleCount, UINT64 firstSampleQpc)
@@ -690,21 +677,12 @@ void CAecApoMFX::ProcessSpeexFrame(std::vector<float> &captureFrameScratch, size
                                    &matchedReferenceEnergy);
     if (lookupStatus != ReferenceLookupStatus::kMatched)
     {
-        if (lookupStatus == ReferenceLookupStatus::kNoReference)
-        {
-            m_aecFramesBypassedNoReference.fetch_add(1, std::memory_order_relaxed);
-        }
-        else
-        {
-            m_aecFramesBypassedBadReference.fetch_add(1, std::memory_order_relaxed);
-        }
         return;
     }
 
     if (captureQpc != 0 && matchedReferenceQpc != 0 && m_qpcTicksPerSecond != 0)
     {
         const int64_t referenceDelta = static_cast<int64_t>(captureQpc) - static_cast<int64_t>(matchedReferenceQpc);
-        m_lastReferenceDeltaQpc.store(referenceDelta, std::memory_order_relaxed);
 
         const float captureEnergy = ComputeMeanSquareEnergy(captureFrameScratch.data(), frameSize);
         if (referenceDelta >= 0 &&
@@ -748,7 +726,6 @@ void CAecApoMFX::ProcessSpeexFrame(std::vector<float> &captureFrameScratch, size
                             speexMic16.data(),
                             speexRef16.data(),
                             speexOut16.data());
-    m_aecFramesProcessed.fetch_add(1, std::memory_order_relaxed);
 
     // AVX2-optimized int16->float conversion
     AudioSampleConverter::SIMD::ConvertInt16ToFloat_AVX2(
@@ -802,7 +779,6 @@ void CAecApoMFX::RunRnnoiseFrame()
     const float vad = rnnoise_process_frame(m_rnnoiseState.get(),
                                             m_rnnoiseOutputScratch.data(),
                                             m_rnnoiseInputScratch.data());
-    m_rnnoiseFramesProcessed.fetch_add(1, std::memory_order_relaxed);
     if (vad >= kRnnoiseVadThreshold)
     {
         m_rnnoiseVadGraceSamplesRemaining = (kRnnoiseSampleRateHz * kRnnoiseVadGraceMs) / 1000;
@@ -944,7 +920,6 @@ void CAecApoMFX::InitializeProcessingBuffers()
         m_renderReferenceSequence.reset();
     }
     ResetRenderReferenceState();
-    ResetProcessingCounters();
     m_estimatedEchoDelayQpc.store((m_qpcTicksPerSecond * kInitialEchoDelayMs) / 1000, std::memory_order_relaxed);
 }
 
