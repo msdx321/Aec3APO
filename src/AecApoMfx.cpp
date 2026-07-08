@@ -962,6 +962,64 @@ void CAecApoMFX::InitializeRnnoiseProcessors()
     }
 }
 
+bool CAecApoMFX::HasRealtimeScratchCapacity(UINT32 frames) const
+{
+    return frames <= m_captureScratch.size() &&
+           frames <= m_outputScratch.size();
+}
+
+void CAecApoMFX::WriteSilentOutput(APO_CONNECTION_PROPERTY *outputConnection, void *outputBuffer, UINT32 frames) const
+{
+    const UINT32 outputBytesPerSample = GetBytesPerSample(m_outputSampleFormat);
+    if (outputBuffer != nullptr && outputBytesPerSample != 0)
+    {
+        ZeroMemory(outputBuffer, static_cast<SIZE_T>(frames) * m_u32SamplesPerFrame * outputBytesPerSample);
+    }
+
+    outputConnection->u32ValidFrameCount = frames;
+    outputConnection->u32BufferFlags = BUFFER_SILENT;
+}
+
+void CAecApoMFX::WriteBypassOutput(void *outputBuffer, UINT32 frames)
+{
+    std::copy(m_captureScratch.begin(),
+              m_captureScratch.begin() + frames,
+              m_outputScratch.begin());
+    WriteMonoSamples(outputBuffer,
+                     m_outputSampleFormat,
+                     frames,
+                     m_u32SamplesPerFrame,
+                     m_outputScratch.data());
+}
+
+APO_BUFFER_FLAGS CAecApoMFX::WriteProcessedOutput(void *outputBuffer,
+                                                  UINT32 frames,
+                                                  UINT64 inputQpc,
+                                                  APO_BUFFER_FLAGS outputBufferFlags)
+{
+    QueueCaptureSamples(m_captureScratch.data(), frames, inputQpc);
+
+    // Emit processed samples; if not enough yet, fall back to input.
+    const size_t produced = m_outputFifo.Pop(m_outputScratch.data(), frames);
+    if (produced > 0)
+    {
+        outputBufferFlags = BUFFER_VALID;
+    }
+    if (produced < frames)
+    {
+        std::copy(m_captureScratch.begin() + produced,
+                  m_captureScratch.begin() + frames,
+                  m_outputScratch.begin() + produced);
+    }
+
+    WriteMonoSamples(outputBuffer,
+                     m_outputSampleFormat,
+                     frames,
+                     m_u32SamplesPerFrame,
+                     m_outputScratch.data());
+    return outputBufferFlags;
+}
+
 #pragma AVRT_CODE_BEGIN
 //-------------------------------------------------------------------------
 // Description:
@@ -1033,15 +1091,9 @@ CAecApoMFX::APOProcess(
         UINT64 inputQpc = (inConnection != nullptr) ? inConnection->u64QPCTime : 0;
         APO_BUFFER_FLAGS outputBufferFlags = ppInputConnections[0]->u32BufferFlags;
 
-        if (frames > m_captureScratch.size() || frames > m_outputScratch.size())
+        if (!HasRealtimeScratchCapacity(frames))
         {
-            const UINT32 outputBytesPerSample = GetBytesPerSample(m_outputSampleFormat);
-            if (outputBuffer != nullptr && outputBytesPerSample != 0)
-            {
-                ZeroMemory(outputBuffer, static_cast<SIZE_T>(frames) * m_u32SamplesPerFrame * outputBytesPerSample);
-            }
-            ppOutputConnections[0]->u32ValidFrameCount = frames;
-            ppOutputConnections[0]->u32BufferFlags = BUFFER_SILENT;
+            WriteSilentOutput(ppOutputConnections[0], outputBuffer, frames);
             break;
         }
 
@@ -1055,37 +1107,11 @@ CAecApoMFX::APOProcess(
 
         if (!m_speexState || m_frameSize == 0)
         {
-            std::copy(m_captureScratch.begin(), m_captureScratch.begin() + frames,
-                      m_outputScratch.begin());
-            WriteMonoSamples(outputBuffer,
-                             m_outputSampleFormat,
-                             frames,
-                             m_u32SamplesPerFrame,
-                             m_outputScratch.data());
+            WriteBypassOutput(outputBuffer, frames);
         }
         else
         {
-            QueueCaptureSamples(m_captureScratch.data(), frames, inputQpc);
-
-            // Emit processed samples; if not enough yet, fall back to input.
-            size_t produced = m_outputFifo.Pop(m_outputScratch.data(), frames);
-            if (produced > 0)
-            {
-                outputBufferFlags = BUFFER_VALID;
-            }
-            if (produced < frames)
-            {
-                for (UINT32 frame = static_cast<UINT32>(produced); frame < frames; ++frame)
-                {
-                    m_outputScratch[frame] = m_captureScratch[frame];
-                }
-            }
-
-            WriteMonoSamples(outputBuffer,
-                             m_outputSampleFormat,
-                             frames,
-                             m_u32SamplesPerFrame,
-                             m_outputScratch.data());
+            outputBufferFlags = WriteProcessedOutput(outputBuffer, frames, inputQpc, outputBufferFlags);
         }
 
         // Set the valid frame count.

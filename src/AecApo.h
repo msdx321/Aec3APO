@@ -220,6 +220,13 @@ private:
                                                      float *matchedReferenceEnergy);
 
     // Helper method for APOProcess
+    bool HasRealtimeScratchCapacity(UINT32 frames) const;
+    void WriteSilentOutput(APO_CONNECTION_PROPERTY *outputConnection, void *outputBuffer, UINT32 frames) const;
+    void WriteBypassOutput(void *outputBuffer, UINT32 frames);
+    APO_BUFFER_FLAGS WriteProcessedOutput(void *outputBuffer,
+                                          UINT32 frames,
+                                          UINT64 inputQpc,
+                                          APO_BUFFER_FLAGS outputBufferFlags);
     void ProcessSpeexFrame(std::vector<float> &captureFrameScratch, size_t frameSize, UINT64 captureQpc);
     bool PrepareRnnoiseInput(std::vector<float> &captureFrameScratch, size_t frameSize);
     void RunRnnoiseFrame();
