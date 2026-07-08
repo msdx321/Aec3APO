@@ -22,7 +22,8 @@ function Resolve-ToolPath {
     param(
         [Parameter(Mandatory=$true)]
         [string]$ToolName,
-        [string]$PreferredPath
+        [string]$PreferredPath,
+        [string[]]$Architectures = @("x64", "x86", "arm64", "arm")
     )
 
     if ($PreferredPath -and (Test-Path -LiteralPath $PreferredPath)) {
@@ -34,6 +35,15 @@ function Resolve-ToolPath {
         return $command.Source
     }
 
+    $kitTool = Find-WindowsKitTool -ToolName $ToolName -Architectures $Architectures
+    if ($kitTool) {
+        return $kitTool
+    }
+
+    throw "$ToolName not found. Install the WDK or pass the tool path explicitly."
+}
+
+function Get-WindowsKitRoots {
     $kitRoots = @()
     if (${env:ProgramFiles(x86)}) {
         $kitRoots += Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10"
@@ -41,10 +51,34 @@ function Resolve-ToolPath {
     if ($env:ProgramFiles) {
         $kitRoots += Join-Path $env:ProgramFiles "Windows Kits\10"
     }
-    $kitRoots = $kitRoots | Where-Object { $_ -and (Test-Path -LiteralPath $_) }
+    $kitRoots | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -Unique
+}
 
-    foreach ($root in $kitRoots) {
-        $candidate = Get-ChildItem -Path $root -Recurse -Filter $ToolName -ErrorAction SilentlyContinue |
+function Find-WindowsKitTool {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$ToolName,
+        [string[]]$Architectures = @("x64", "x86", "arm64", "arm")
+    )
+
+    foreach ($root in Get-WindowsKitRoots) {
+        $binRoot = Join-Path $root "bin"
+        if (Test-Path -LiteralPath $binRoot) {
+            $versionDirs = Get-ChildItem -LiteralPath $binRoot -Directory -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -match '^\d+(\.\d+)+$' } |
+                Sort-Object Name -Descending
+
+            foreach ($versionDir in $versionDirs) {
+                foreach ($arch in $Architectures) {
+                    $candidate = Join-Path (Join-Path $versionDir.FullName $arch) $ToolName
+                    if (Test-Path -LiteralPath $candidate) {
+                        return (Resolve-Path -LiteralPath $candidate).Path
+                    }
+                }
+            }
+        }
+
+        $candidate = Get-ChildItem -LiteralPath $root -Recurse -Filter $ToolName -ErrorAction SilentlyContinue |
             Sort-Object FullName -Descending |
             Select-Object -First 1
         if ($candidate) {
@@ -52,7 +86,26 @@ function Resolve-ToolPath {
         }
     }
 
-    throw "$ToolName not found. Install the WDK or pass the tool path explicitly."
+    return $null
+}
+
+function Add-CertificateToStore {
+    param(
+        [Parameter(Mandatory=$true)]
+        [System.Security.Cryptography.X509Certificates.X509Certificate2]$Certificate,
+        [Parameter(Mandatory=$true)]
+        [string]$StoreName,
+        [Parameter(Mandatory=$true)]
+        [string]$StoreLocation
+    )
+
+    $store = New-Object System.Security.Cryptography.X509Certificates.X509Store($StoreName, $StoreLocation)
+    try {
+        $store.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
+        $store.Add($Certificate)
+    } finally {
+        $store.Close()
+    }
 }
 
 $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
@@ -120,25 +173,21 @@ if (-not $PfxPath) {
         # Already ensured admin above.
     }
 
-    $rootStore = New-Object System.Security.Cryptography.X509Certificates.X509Store("Root", $TrustStore)
-    $rootStore.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
-    $rootStore.Add($cert)
-    $rootStore.Close()
-
-    $publisherStore = New-Object System.Security.Cryptography.X509Certificates.X509Store("TrustedPublisher", $TrustStore)
-    $publisherStore.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
-    $publisherStore.Add($cert)
-    $publisherStore.Close()
+    Add-CertificateToStore -Certificate $cert -StoreName "Root" -StoreLocation $TrustStore
+    Add-CertificateToStore -Certificate $cert -StoreName "TrustedPublisher" -StoreLocation $TrustStore
 }
 
-$inf2cat = Resolve-ToolPath -ToolName "Inf2Cat.exe" -PreferredPath $Inf2CatPath
-$signtool = Resolve-ToolPath -ToolName "signtool.exe" -PreferredPath $SignToolPath
+$inf2cat = Resolve-ToolPath -ToolName "Inf2Cat.exe" -PreferredPath $Inf2CatPath -Architectures @("x86", "x64")
+$signtool = Resolve-ToolPath -ToolName "signtool.exe" -PreferredPath $SignToolPath -Architectures @("x64", "x86")
 
 $catPath = Join-Path $DriverDir "aec3apo.cat"
 if (Test-Path -LiteralPath $catPath) {
     Remove-Item -LiteralPath $catPath -Force
 }
-& $inf2cat /driver:$DriverDir /os:$Inf2CatOs | Write-Host
+& $inf2cat /driver:$DriverDir /os:$Inf2CatOs
+if ($LASTEXITCODE -ne 0) {
+    exit $LASTEXITCODE
+}
 
 if (-not (Test-Path -LiteralPath $catPath)) {
     throw "Catalog not generated: $catPath"

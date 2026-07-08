@@ -13,6 +13,52 @@ function Test-Administrator {
     return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
+function Get-WindowsKitRoots {
+    $kitRoots = @()
+    if (${env:ProgramFiles(x86)}) {
+        $kitRoots += Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10"
+    }
+    if ($env:ProgramFiles) {
+        $kitRoots += Join-Path $env:ProgramFiles "Windows Kits\10"
+    }
+    $kitRoots | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -Unique
+}
+
+function Find-WindowsKitTool {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$ToolName,
+        [string[]]$Architectures = @("x64", "x86", "arm64", "arm")
+    )
+
+    foreach ($root in Get-WindowsKitRoots) {
+        $binRoot = Join-Path $root "bin"
+        if (Test-Path -LiteralPath $binRoot) {
+            $versionDirs = Get-ChildItem -LiteralPath $binRoot -Directory -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -match '^\d+(\.\d+)+$' } |
+                Sort-Object Name -Descending
+
+            foreach ($versionDir in $versionDirs) {
+                foreach ($arch in $Architectures) {
+                    $candidate = Join-Path (Join-Path $versionDir.FullName $arch) $ToolName
+                    if (Test-Path -LiteralPath $candidate) {
+                        return (Resolve-Path -LiteralPath $candidate).Path
+                    }
+                }
+            }
+        }
+
+        $candidate = Get-ChildItem -LiteralPath $root -Recurse -Filter $ToolName -ErrorAction SilentlyContinue |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+        if ($candidate) {
+            return $candidate.FullName
+        }
+    }
+
+    return $null
+}
+
 function Resolve-OptionalDevcon {
     param([string]$PreferredPath)
 
@@ -25,25 +71,34 @@ function Resolve-OptionalDevcon {
         return $command.Source
     }
 
-    $kitRoots = @()
-    if (${env:ProgramFiles(x86)}) {
-        $kitRoots += Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10"
-    }
-    if ($env:ProgramFiles) {
-        $kitRoots += Join-Path $env:ProgramFiles "Windows Kits\10"
-    }
-    $kitRoots = $kitRoots | Where-Object { $_ -and (Test-Path -LiteralPath $_) }
-
-    foreach ($root in $kitRoots) {
-        $candidate = Get-ChildItem -Path $root -Recurse -Filter "devcon.exe" -ErrorAction SilentlyContinue |
-            Sort-Object FullName -Descending |
-            Select-Object -First 1
-        if ($candidate) {
-            return $candidate.FullName
-        }
+    $kitTool = Find-WindowsKitTool -ToolName "devcon.exe" -Architectures @("x64", "x86", "arm64", "arm")
+    if ($kitTool) {
+        return $kitTool
     }
 
     return $null
+}
+
+function Remove-CertificatesFromStore {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$StoreName,
+        [Parameter(Mandatory=$true)]
+        [string]$StoreLocation,
+        [Parameter(Mandatory=$true)]
+        [string]$Subject
+    )
+
+    $store = New-Object System.Security.Cryptography.X509Certificates.X509Store($StoreName, $StoreLocation)
+    try {
+        $store.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
+        $toRemove = $store.Certificates | Where-Object { $_.Subject -eq $Subject }
+        foreach ($cert in $toRemove) {
+            $store.Remove($cert)
+        }
+    } finally {
+        $store.Close()
+    }
 }
 
 function Get-PublishedDriverNames {
@@ -129,13 +184,7 @@ $storesToClean = @(
 )
 
 foreach ($entry in $storesToClean) {
-    $store = New-Object System.Security.Cryptography.X509Certificates.X509Store($entry.Name, $entry.Location)
-    $store.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
-    $toRemove = $store.Certificates | Where-Object { $_.Subject -eq $CertSubject }
-    foreach ($cert in $toRemove) {
-        $store.Remove($cert)
-    }
-    $store.Close()
+    Remove-CertificatesFromStore -StoreName $entry.Name -StoreLocation $entry.Location -Subject $CertSubject
 }
 
 Restart-Service Audiosrv -Force
