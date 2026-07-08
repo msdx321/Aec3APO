@@ -159,6 +159,54 @@ namespace
 
         return info;
     }
+
+    static HRESULT CopyEffectIdsToCoTaskMem(const GUID *effectIds,
+                                            UINT effectCount,
+                                            LPGUID *outputEffects,
+                                            UINT *outputCount)
+    {
+        *outputEffects = nullptr;
+        *outputCount = 0;
+
+        const size_t byteCount = static_cast<size_t>(effectCount) * sizeof(GUID);
+        LPGUID copiedEffects = static_cast<LPGUID>(CoTaskMemAlloc(byteCount));
+        if (copiedEffects == nullptr)
+        {
+            return E_OUTOFMEMORY;
+        }
+
+        CopyMemory(copiedEffects, effectIds, byteCount);
+        *outputEffects = copiedEffects;
+        *outputCount = effectCount;
+        return S_OK;
+    }
+
+    static HRESULT CreateControllableEffects(const GUID *effectIds,
+                                             UINT effectCount,
+                                             AUDIO_SYSTEMEFFECT **effects,
+                                             UINT *numEffects)
+    {
+        *effects = nullptr;
+        *numEffects = 0;
+
+        AUDIO_SYSTEMEFFECT *audioEffects = static_cast<AUDIO_SYSTEMEFFECT *>(
+            CoTaskMemAlloc(static_cast<size_t>(effectCount) * sizeof(AUDIO_SYSTEMEFFECT)));
+        if (audioEffects == nullptr)
+        {
+            return E_OUTOFMEMORY;
+        }
+
+        for (UINT i = 0; i < effectCount; i++)
+        {
+            audioEffects[i].id = effectIds[i];
+            audioEffects[i].state = AUDIO_SYSTEMEFFECT_STATE_ON;
+            audioEffects[i].canSetState = FALSE;
+        }
+
+        *effects = audioEffects;
+        *numEffects = effectCount;
+        return S_OK;
+    }
 } // namespace
 
 static AecSampleFormat GetAecSampleFormat(const UNCOMPRESSEDAUDIOFORMAT &format)
@@ -1350,14 +1398,7 @@ STDMETHODIMP CAecApoMFX::GetEffectsList(_Outptr_result_buffer_maybenull_(*pcEffe
 
     if (m_audioSignalProcessingMode == AUDIO_SIGNALPROCESSINGMODE_COMMUNICATIONS)
     {
-        // Return the list of effects implemented by this APO for COMMUNICATIONS processing mode
-        *ppEffectsIds = static_cast<LPGUID>(CoTaskMemAlloc(sizeof(kAecEffects)));
-        if (!*ppEffectsIds)
-        {
-            return E_OUTOFMEMORY;
-        }
-        *pcEffects = ARRAYSIZE(kAecEffects);
-        CopyMemory(*ppEffectsIds, kAecEffects, sizeof(kAecEffects));
+        return CopyEffectIdsToCoTaskMem(kAecEffects, ARRAYSIZE(kAecEffects), ppEffectsIds, pcEffects);
     }
 
     return S_OK;
@@ -1377,23 +1418,7 @@ STDMETHODIMP CAecApoMFX::GetControllableSystemEffectsList(_Outptr_result_buffer_
 
     if (m_audioSignalProcessingMode == AUDIO_SIGNALPROCESSINGMODE_COMMUNICATIONS)
     {
-        // Return the list of effects implemented by this APO for COMMUNICATIONS processing mode
-        AUDIO_SYSTEMEFFECT *audioEffects = static_cast<AUDIO_SYSTEMEFFECT *>(
-            CoTaskMemAlloc(ARRAYSIZE(kAecEffects) * sizeof(AUDIO_SYSTEMEFFECT)));
-        if (audioEffects == nullptr)
-        {
-            return E_OUTOFMEMORY;
-        }
-
-        for (UINT i = 0; i < ARRAYSIZE(kAecEffects); i++)
-        {
-            audioEffects[i].id = kAecEffects[i];
-            audioEffects[i].state = AUDIO_SYSTEMEFFECT_STATE_ON;
-            audioEffects[i].canSetState = FALSE;
-        }
-
-        *numEffects = ARRAYSIZE(kAecEffects);
-        *effects = audioEffects;
+        return CreateControllableEffects(kAecEffects, ARRAYSIZE(kAecEffects), effects, numEffects);
     }
 
     return S_OK;
