@@ -130,17 +130,23 @@ namespace AudioSampleConverter
     //
     // PCM24 packed format helpers
     //
+    inline int32_t SignExtend24(int32_t value)
+    {
+        uint32_t sample = static_cast<uint32_t>(value) & 0x00FFFFFFu;
+        if ((sample & static_cast<uint32_t>(kPcm24SignBit)) != 0)
+        {
+            sample |= static_cast<uint32_t>(kPcm24SignExtensionMask);
+        }
+        return static_cast<int32_t>(sample);
+    }
+
     inline int32_t ReadPcm24PackedSample(const uint8_t *data, size_t sampleIndex)
     {
         const uint8_t *src = data + (sampleIndex * 3);
-        int32_t value = static_cast<int32_t>(src[0]) |
-                        (static_cast<int32_t>(src[1]) << 8) |
-                        (static_cast<int32_t>(src[2]) << 16);
-        if (value & kPcm24SignBit)
-        {
-            value |= kPcm24SignExtensionMask;
-        }
-        return value;
+        const int32_t value = static_cast<int32_t>(src[0]) |
+                              (static_cast<int32_t>(src[1]) << 8) |
+                              (static_cast<int32_t>(src[2]) << 16);
+        return SignExtend24(value);
     }
 
     inline void WritePcm24PackedSample(uint8_t *data, size_t sampleIndex, int32_t value)
@@ -149,11 +155,6 @@ namespace AudioSampleConverter
         dst[0] = static_cast<uint8_t>(value & 0xFF);
         dst[1] = static_cast<uint8_t>((value >> 8) & 0xFF);
         dst[2] = static_cast<uint8_t>((value >> 16) & 0xFF);
-    }
-
-    inline int32_t SignExtend24(int32_t value)
-    {
-        return (value << 8) >> 8;
     }
 
     template <typename ConvertFunc>
