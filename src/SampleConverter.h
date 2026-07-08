@@ -107,26 +107,6 @@ namespace AudioSampleConverter
             return static_cast<int32_t>(ScaleAndClampSample(v, kInt24ScaleFactor, kInt24MinValue, kInt24MaxValue));
         }
 
-        // Batch conversion helpers for SIMD
-        static void ToFloat32Batch(const int32_t *input, float *output, size_t count)
-        {
-            SIMD::ConvertInt32ToFloat_AVX2(input, output, count, kInt32ScaleFactor);
-        }
-
-        static void FromFloat32Batch(const float *input, int32_t *output, size_t count)
-        {
-            SIMD::ConvertFloatToInt32_AVX2(input, output, count, kInt32ScaleFactor);
-        }
-
-        static void ToFloat24Batch(const int32_t *input, float *output, size_t count)
-        {
-            SIMD::ConvertInt32ToFloat_AVX2(input, output, count, kInt24ScaleFactor);
-        }
-
-        static void FromFloat24Batch(const float *input, int32_t *output, size_t count)
-        {
-            SIMD::ConvertFloatToInt32_AVX2(input, output, count, kInt24ScaleFactor);
-        }
     };
 
     //
