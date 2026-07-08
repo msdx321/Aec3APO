@@ -373,12 +373,9 @@ namespace AudioSampleConverter
         {
             for (uint32_t frame = 0; frame < frames; ++frame)
             {
-                T value = fromFloat(in[frame]);
+                const T value = fromFloat(in[frame]);
                 T *framePtr = out + (frame * channels);
-                for (uint32_t ch = 0; ch < channels; ++ch)
-                {
-                    framePtr[ch] = value;
-                }
+                std::fill_n(framePtr, channels, value);
             }
         }
     }
