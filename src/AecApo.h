@@ -92,7 +92,6 @@ class CAecApoMFX : public CComObjectRootEx<CComMultiThreadModel>,
                    public IApoAuxiliaryInputRT
 {
 public:
-    // constructor
     CAecApoMFX()
         : CBaseAudioProcessingObject(sm_RegProperties)
     {

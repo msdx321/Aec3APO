@@ -1062,7 +1062,7 @@ APO_BUFFER_FLAGS CAecApoMFX::WriteProcessedOutput(void *outputBuffer,
 //
 //  This function processes data in a manner dependent on the implementing
 //  object.  This routine can not fail and can not block, or call any other
-//  routine that blocks, or touch pagable memory.
+//  routine that blocks, or touch pageable memory.
 //
 STDMETHODIMP_(void)
 CAecApoMFX::APOProcess(
@@ -1659,7 +1659,7 @@ CAecApoMFX::AddAuxiliaryInput(
 
         // Register for notification in GetApoNotificationRegistrationInfo
 
-        // Keep a reference to the loopback device that will be registering for endpoint volume notifcations.
+        // Keep a reference to the loopback device that will be registering for endpoint volume notifications.
 
         IF_TRUE_ACTION_JUMP(papoSysFxInit3->pDeviceCollection == nullptr, hResult = E_INVALIDARG, Exit);
         UINT32 numDevices;
