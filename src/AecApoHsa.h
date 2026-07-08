@@ -30,22 +30,17 @@ public:
     // IAudioSystemEffectsPropertyStore
     STDMETHOD(OpenDefaultPropertyStore)(DWORD /* stgmAccess */, IPropertyStore **propStore) override
     {
-        if (propStore == nullptr)
-        {
-            return E_POINTER;
-        }
-        *propStore = nullptr;
-        return PSCreateMemoryPropertyStore(IID_PPV_ARGS(propStore));
+        return OpenMemoryPropertyStore(propStore);
     }
 
     STDMETHOD(OpenUserPropertyStore)(DWORD /* stgmAccess */, IPropertyStore **propStore) override
     {
-        return OpenDefaultPropertyStore(STGM_READ, propStore);
+        return OpenMemoryPropertyStore(propStore);
     }
 
     STDMETHOD(OpenVolatilePropertyStore)(DWORD /* stgmAccess */, IPropertyStore **propStore) override
     {
-        return OpenDefaultPropertyStore(STGM_READWRITE, propStore);
+        return OpenMemoryPropertyStore(propStore);
     }
 
     STDMETHOD(ResetUserPropertyStore)() override
@@ -68,6 +63,17 @@ public:
         IAudioSystemEffectsPropertyChangeNotificationClient * /* callback */) override
     {
         return S_OK;
+    }
+
+private:
+    static HRESULT OpenMemoryPropertyStore(IPropertyStore **propStore)
+    {
+        if (propStore == nullptr)
+        {
+            return E_POINTER;
+        }
+        *propStore = nullptr;
+        return PSCreateMemoryPropertyStore(IID_PPV_ARGS(propStore));
     }
 };
 #pragma AVRT_VTABLES_END
