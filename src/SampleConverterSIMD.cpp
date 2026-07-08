@@ -4,7 +4,7 @@
 // Description:
 //
 //  AVX2-optimized implementations of audio sample format conversions
-//  Requires AVX2 CPU - no scalar fallbacks
+//  Requires AVX2 CPU - scalar tails handle remainder samples
 //
 
 #include "SampleConverter.h"
