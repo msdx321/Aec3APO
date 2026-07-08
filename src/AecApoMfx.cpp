@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
 
 #include "AecApo.h"
 #include "SampleConverter.h"
@@ -607,7 +608,7 @@ CAecApoMFX::ReferenceLookupStatus CAecApoMFX::TryGetRenderReferenceFrame(UINT64 
     bool found = false;
     size_t bestSlot = 0;
     uint32_t bestSequence = 0;
-    UINT64 bestDelta = ~0ULL;
+    UINT64 bestDelta = (std::numeric_limits<UINT64>::max)();
     const uint64_t slotsToCheck = (std::min)(published, static_cast<uint64_t>(m_renderReferenceSlotCount));
 
     for (uint64_t i = 0; i < slotsToCheck; ++i)
