@@ -1760,16 +1760,16 @@ CAecApoMFX::AcceptInput(DWORD dwInputId,
             ? reinterpret_cast<const APO_CONNECTION_PROPERTY_V2 *>(pInputConnection)
             : nullptr;
 
-    UINT32 frames = pInputConnection->u32ValidFrameCount;
+    const UINT32 frames = pInputConnection->u32ValidFrameCount;
     if (frames == 0 || frames > m_renderScratch.size())
     {
         return;
     }
 
-    bool inputSilent = (pInputConnection->u32BufferFlags == BUFFER_SILENT ||
-                        pInputConnection->pBuffer == 0);
-    UINT64 inputQpc = (connectionV2 != nullptr) ? connectionV2->u64QPCTime : 0;
-    UINT32 renderChannels = (m_renderSamplesPerFrame != 0) ? m_renderSamplesPerFrame : 1;
+    const bool inputSilent = (pInputConnection->u32BufferFlags == BUFFER_SILENT ||
+                              pInputConnection->pBuffer == 0);
+    const UINT64 inputQpc = (connectionV2 != nullptr) ? connectionV2->u64QPCTime : 0;
+    const UINT32 renderChannels = (m_renderSamplesPerFrame != 0) ? m_renderSamplesPerFrame : 1;
     ExtractMonoSamples(reinterpret_cast<const void *>(pInputConnection->pBuffer),
                        m_renderSampleFormat,
                        frames,
@@ -1792,12 +1792,12 @@ CAecApoMFX::AcceptInput(DWORD dwInputId,
         const UINT64 chunkQpc = (inputQpc != 0)
                                   ? inputQpc + SamplesToQpcTicks(inputOffset, m_renderSampleRateHz)
                                   : 0;
-        int err = speex_resampler_process_float(m_renderResampler.get(),
-                                                0,
-                                                m_renderScratch.data() + inputOffset,
-                                                &inLen,
-                                                m_renderResampledScratch.data(),
-                                                &outLen);
+        const int err = speex_resampler_process_float(m_renderResampler.get(),
+                                                      0,
+                                                      m_renderScratch.data() + inputOffset,
+                                                      &inLen,
+                                                      m_renderResampledScratch.data(),
+                                                      &outLen);
         if (err != RESAMPLER_ERR_SUCCESS)
         {
             break;
