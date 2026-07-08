@@ -1408,29 +1408,29 @@ static HRESULT IsFormatSupportedForAec(
     ASSERT_NONREALTIME();
 
     HRESULT hr = S_OK;
-    UNCOMPRESSEDAUDIOFORMAT format;
-    AecSampleFormat sampleFormat = AecSampleFormat::kUnknown;
-    bool formatValid = false;
+    UNCOMPRESSEDAUDIOFORMAT format = {};
 
     IF_TRUE_ACTION_JUMP((pMediaType == nullptr || pSupported == nullptr), hr = E_INVALIDARG, exit);
     hr = pMediaType->GetUncompressedAudioFormat(&format);
     IF_FAILED_JUMP(hr, exit);
 
-    sampleFormat = GetAecSampleFormat(format);
-    formatValid = sampleFormat != AecSampleFormat::kUnknown &&
-                  IsSupportedAecSampleRate(format.fFramesPerSecond);
+    {
+        const AecSampleFormat sampleFormat = GetAecSampleFormat(format);
+        const bool formatValid = sampleFormat != AecSampleFormat::kUnknown &&
+                                 IsSupportedAecSampleRate(format.fFramesPerSecond);
 
-    if (requireMono)
-    {
-        // Output must be mono
-        *pSupported = formatValid && format.dwSamplesPerFrame == 1;
-    }
-    else
-    {
-        // Input can be multi-channel
-        *pSupported = formatValid &&
-                      format.dwSamplesPerFrame > 0 &&
-                      format.dwSamplesPerFrame <= maxChannels;
+        if (requireMono)
+        {
+            // Output must be mono
+            *pSupported = formatValid && format.dwSamplesPerFrame == 1;
+        }
+        else
+        {
+            // Input can be multi-channel
+            *pSupported = formatValid &&
+                          format.dwSamplesPerFrame > 0 &&
+                          format.dwSamplesPerFrame <= maxChannels;
+        }
     }
 
 exit:
