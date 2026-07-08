@@ -11,14 +11,12 @@
 #include <cstdint>
 #include <cstddef>
 
-// Uncomment to force scalar implementation (no AVX2)
-
 namespace AudioSampleConverter
 {
     namespace SIMD
     {
         //
-        // Priority 1: Float ↔ Int16 Conversions
+        // Float to/from Int16 conversions
         // Used in ProcessSpeexFrame - called every 10ms frame
         //
 
@@ -37,7 +35,7 @@ namespace AudioSampleConverter
         void ConvertInt16ToFloat_AVX2(const int16_t *input, float *output, size_t count);
 
         //
-        // Priority 1: PCM Scaling Operations
+        // PCM scaling operations
         // Used in ProcessRnnoiseFrame for PCM normalization
         //
 
@@ -49,7 +47,7 @@ namespace AudioSampleConverter
         void ScaleFloatArray_AVX2(float *data, size_t count, float scale_factor);
 
         //
-        // Priority 2: Channel Operations (Optional - Phase 2)
+        // Channel operations
         //
 
         // Extract stereo to mono with averaging (AVX2 optimized)
@@ -67,7 +65,7 @@ namespace AudioSampleConverter
         void WriteMonoToStereo_Float_AVX2(const float *input, float *output, size_t frames);
 
         //
-        // Priority 3: Int32 Conversions (Optional - Phase 3)
+        // Int32 conversions
         //
 
         // Convert float to int32 with AVX2 optimization (for PCM24/PCM32)
