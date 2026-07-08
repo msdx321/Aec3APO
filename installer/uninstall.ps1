@@ -104,13 +104,13 @@ function Remove-CertificatesFromStore {
 function Get-PublishedDriverNames {
     param([string]$OriginalName)
 
-    $drivers = @()
+    $drivers = [System.Collections.Generic.List[object]]::new()
     $current = @{}
     $lines = & pnputil /enum-drivers
     foreach ($line in $lines) {
         if ($line -match '^\s*$') {
             if ($current.PublishedName -or $current.OriginalName) {
-                $drivers += New-Object psobject -Property $current
+                [void]$drivers.Add([pscustomobject]$current)
             }
             $current = @{}
             continue
@@ -128,7 +128,7 @@ function Get-PublishedDriverNames {
     }
 
     if ($current.PublishedName -or $current.OriginalName) {
-        $drivers += New-Object psobject -Property $current
+        [void]$drivers.Add([pscustomobject]$current)
     }
 
     $drivers |
