@@ -64,6 +64,11 @@ namespace
         return std::fabs(requestedRateHz - static_cast<float>(supportedRateHz));
     }
 
+    static int RnnoiseVadGraceSamples()
+    {
+        return (kRnnoiseSampleRateHz * kRnnoiseVadGraceMs) / 1000;
+    }
+
     static bool IsSupportedAecSampleRate(float rate_hz)
     {
         return std::any_of(kSupportedSampleRatesHz.begin(), kSupportedSampleRatesHz.end(),
@@ -790,7 +795,7 @@ void CAecApoMFX::RunRnnoiseFrame()
                                             m_rnnoiseInputScratch.data());
     if (vad >= kRnnoiseVadThreshold)
     {
-        m_rnnoiseVadGraceSamplesRemaining = (kRnnoiseSampleRateHz * kRnnoiseVadGraceMs) / 1000;
+        m_rnnoiseVadGraceSamplesRemaining = RnnoiseVadGraceSamples();
     }
     else if (m_rnnoiseVadGraceSamplesRemaining > 0)
     {
@@ -997,7 +1002,7 @@ void CAecApoMFX::InitializeRnnoiseProcessors()
     m_rnnoiseState.reset(rnnoise_create(nullptr));
     m_rnnoiseInputScratch.assign(m_rnnoiseFrameSize, 0.0f);
     m_rnnoiseOutputScratch.assign(m_rnnoiseFrameSize, 0.0f);
-    m_rnnoiseVadGraceSamplesRemaining = (kRnnoiseSampleRateHz * kRnnoiseVadGraceMs) / 1000;
+    m_rnnoiseVadGraceSamplesRemaining = RnnoiseVadGraceSamples();
 
     if (m_sampleRateHz == kRnnoiseSampleRateHz)
     {
