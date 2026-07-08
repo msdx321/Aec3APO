@@ -163,19 +163,14 @@ namespace
         UINT32 channelCount = 1;
     };
 
-    static AecSampleFormat ResolvePreferredSampleFormat(AecSampleFormat requestedFormat)
-    {
-        return (requestedFormat != AecSampleFormat::kUnknown)
-                   ? requestedFormat
-                   : AecSampleFormat::kFloat32;
-    }
-
     static UNCOMPRESSEDAUDIOFORMAT CreatePreferredUncompressedFormat(
         UINT32 channelCount,
         float requestedSampleRate,
         AecSampleFormat requestedFormat)
     {
-        const AecSampleFormat formatType = ResolvePreferredSampleFormat(requestedFormat);
+        const AecSampleFormat formatType = (requestedFormat != AecSampleFormat::kUnknown)
+                                               ? requestedFormat
+                                               : AecSampleFormat::kFloat32;
 
         UNCOMPRESSEDAUDIOFORMAT format = {};
         format.guidFormatType = GetFormatSubtype(formatType);
