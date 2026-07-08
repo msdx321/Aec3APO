@@ -942,19 +942,23 @@ void CAecApoMFX::InitializeSpeexProcessors()
     m_speexState.reset();
 
     const int speexFrameSize = static_cast<int>(m_frameSize);
-    if (speexFrameSize > 0)
+    if (speexFrameSize <= 0)
     {
-        const int filterLen = speexFrameSize * kFilterTailMultiplier;
-        m_speexState.reset(speex_echo_state_init(speexFrameSize, filterLen));
-        if (m_speexState)
-        {
-            speex_echo_ctl(m_speexState.get(), SPEEX_ECHO_SET_SAMPLING_RATE, &m_sampleRateHz);
-            m_speexMic16.assign(m_frameSize, 0);
-            m_speexRef16.assign(m_frameSize, 0);
-            m_speexOut16.assign(m_frameSize, 0);
-            m_speexRenderFrameScratch.assign(m_frameSize, 0.0f);
-        }
+        return;
     }
+
+    const int filterLen = speexFrameSize * kFilterTailMultiplier;
+    m_speexState.reset(speex_echo_state_init(speexFrameSize, filterLen));
+    if (!m_speexState)
+    {
+        return;
+    }
+
+    speex_echo_ctl(m_speexState.get(), SPEEX_ECHO_SET_SAMPLING_RATE, &m_sampleRateHz);
+    m_speexMic16.assign(m_frameSize, 0);
+    m_speexRef16.assign(m_frameSize, 0);
+    m_speexOut16.assign(m_frameSize, 0);
+    m_speexRenderFrameScratch.assign(m_frameSize, 0.0f);
 }
 
 //
