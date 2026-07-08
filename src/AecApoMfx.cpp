@@ -111,7 +111,7 @@ namespace
         int err = RESAMPLER_ERR_SUCCESS;
         SpeexResamplerRAII::ResamplerStatePtr resampler(
             speex_resampler_init(1, inputRateHz, outputRateHz, SPEEX_RESAMPLER_QUALITY_MAX, &err));
-        if (err != RESAMPLER_ERR_SUCCESS)
+        if (err != RESAMPLER_ERR_SUCCESS || !resampler)
         {
             return {};
         }
