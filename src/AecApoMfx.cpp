@@ -21,6 +21,7 @@
 #include <array>
 #include <cmath>
 #include <limits>
+#include <numeric>
 
 #include "AecApo.h"
 #include "SampleConverter.h"
@@ -104,12 +105,12 @@ namespace
             return 0.0f;
         }
 
-        double sum = 0.0;
-        for (size_t i = 0; i < sampleCount; ++i)
-        {
-            const double sample = samples[i];
-            sum += sample * sample;
-        }
+        const double sum = std::accumulate(samples, samples + sampleCount, 0.0,
+                                           [](double total, float sample)
+                                           {
+                                               const double sampleValue = sample;
+                                               return total + (sampleValue * sampleValue);
+                                           });
 
         return static_cast<float>(sum / static_cast<double>(sampleCount));
     }
