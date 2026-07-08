@@ -340,7 +340,7 @@ const AVRT_DATA CRegAPOProperties<1> CAecApoMFX::sm_RegProperties(
     1,                                                                                   // major version #
     1,                                                                                   // minor version #
     __uuidof(IAudioProcessingObject),                                                    // iid of primary interface
-    (APO_FLAG)(APO_FLAG_BITSPERSAMPLE_MUST_MATCH | APO_FLAG_FRAMESPERSECOND_MUST_MATCH), // kak check this
+    (APO_FLAG)(APO_FLAG_BITSPERSAMPLE_MUST_MATCH | APO_FLAG_FRAMESPERSECOND_MUST_MATCH),
     DEFAULT_APOREG_MININPUTCONNECTIONS,
     DEFAULT_APOREG_MAXINPUTCONNECTIONS,
     DEFAULT_APOREG_MINOUTPUTCONNECTIONS,
