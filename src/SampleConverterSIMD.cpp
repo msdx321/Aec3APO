@@ -202,9 +202,11 @@ namespace AudioSampleConverter
         //
         void ConvertFloatToInt32_AVX2(const float *input, int32_t *output, size_t count, float scale_factor)
         {
+            const float minValue = -scale_factor;
+            const float maxValue = scale_factor - 1.0f;
             const __m256 scale = _mm256_set1_ps(scale_factor);
-            const __m256 max_val = _mm256_set1_ps(scale_factor - 1.0f);
-            const __m256 min_val = _mm256_set1_ps(-scale_factor);
+            const __m256 max_val = _mm256_set1_ps(maxValue);
+            const __m256 min_val = _mm256_set1_ps(minValue);
             const __m256 unit_max = _mm256_set1_ps(1.0f);
             const __m256 unit_min = _mm256_set1_ps(-1.0f);
 
@@ -224,7 +226,7 @@ namespace AudioSampleConverter
             for (; i < count; ++i)
             {
                 output[i] = static_cast<int32_t>(
-                    ScaleAndClampSample(input[i], scale_factor, -scale_factor, scale_factor - 1.0f));
+                    ScaleAndClampSample(input[i], scale_factor, minValue, maxValue));
             }
         }
 
