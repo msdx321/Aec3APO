@@ -59,12 +59,17 @@ namespace
     constexpr float kDelayEstimatorEnergyFloor = 1.0e-5f;
     const GUID kAecEffects[] = {AUDIO_EFFECT_TYPE_ACOUSTIC_ECHO_CANCELLATION};
 
+    static float SampleRateDeltaHz(float requestedRateHz, int supportedRateHz)
+    {
+        return std::fabs(requestedRateHz - static_cast<float>(supportedRateHz));
+    }
+
     static bool IsSupportedAecSampleRate(float rate_hz)
     {
         return std::any_of(kSupportedSampleRatesHz.begin(), kSupportedSampleRatesHz.end(),
                            [rate_hz](int rate)
                            {
-                               return std::fabs(rate_hz - static_cast<float>(rate)) < kSampleRateMatchToleranceHz;
+                               return SampleRateDeltaHz(rate_hz, rate) < kSampleRateMatchToleranceHz;
                            });
     }
 
@@ -73,8 +78,8 @@ namespace
         auto closest = std::min_element(kSupportedSampleRatesHz.begin(), kSupportedSampleRatesHz.end(),
                                         [rate_hz](int a, int b)
                                         {
-                                            float diffA = std::fabs(rate_hz - static_cast<float>(a));
-                                            float diffB = std::fabs(rate_hz - static_cast<float>(b));
+                                            const float diffA = SampleRateDeltaHz(rate_hz, a);
+                                            const float diffB = SampleRateDeltaHz(rate_hz, b);
                                             return diffA < diffB;
                                         });
 
