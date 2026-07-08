@@ -7,22 +7,9 @@
 //  Requires AVX2 CPU - no scalar fallbacks
 //
 
+#include "SampleConverter.h"
 #include "SampleConverterSIMD.h"
-#include <algorithm>
 #include <immintrin.h> // AVX2 intrinsics
-
-namespace
-{
-    float ClampUnitSample(float v)
-    {
-        return (std::clamp)(v, -1.0f, 1.0f);
-    }
-
-    float ScaleAndClampSample(float v, float scale_factor, float min_value, float max_value)
-    {
-        return (std::clamp)(ClampUnitSample(v) * scale_factor, min_value, max_value);
-    }
-}
 
 namespace AudioSampleConverter
 {
