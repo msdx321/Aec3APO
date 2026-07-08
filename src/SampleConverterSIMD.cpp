@@ -22,9 +22,9 @@ namespace AudioSampleConverter
         //
         void ConvertFloatToInt16_AVX2(const float *input, int16_t *output, size_t count)
         {
-            const __m256 scale = _mm256_set1_ps(32768.0f);
-            const __m256 max_val = _mm256_set1_ps(32767.0f);
-            const __m256 min_val = _mm256_set1_ps(-32768.0f);
+            const __m256 scale = _mm256_set1_ps(kInt16ScaleFactor);
+            const __m256 max_val = _mm256_set1_ps(kInt16MaxValue);
+            const __m256 min_val = _mm256_set1_ps(kInt16MinValue);
             const __m256 one = _mm256_set1_ps(1.0f);
             const __m256 neg_one = _mm256_set1_ps(-1.0f);
 
@@ -58,7 +58,11 @@ namespace AudioSampleConverter
             for (; i < count; ++i)
             {
                 output[i] = static_cast<int16_t>(
-                    ScaleAndClampSample(input[i], 32768.0f, -32768.0f, 32767.0f));
+                    ScaleAndClampSample(
+                        input[i],
+                        kInt16ScaleFactor,
+                        kInt16MinValue,
+                        kInt16MaxValue));
             }
         }
 
@@ -67,7 +71,8 @@ namespace AudioSampleConverter
         //
         void ConvertInt16ToFloat_AVX2(const int16_t *input, float *output, size_t count)
         {
-            const __m256 inv_scale = _mm256_set1_ps(1.0f / 32768.0f);
+            const float inverseScale = 1.0f / kInt16ScaleFactor;
+            const __m256 inv_scale = _mm256_set1_ps(inverseScale);
 
             size_t i = 0;
             for (; i + 15 < count; i += 16)
@@ -89,7 +94,7 @@ namespace AudioSampleConverter
 
             for (; i < count; ++i)
             {
-                output[i] = static_cast<float>(input[i]) * (1.0f / 32768.0f);
+                output[i] = static_cast<float>(input[i]) * inverseScale;
             }
         }
 
