@@ -36,7 +36,7 @@ function Find-WindowsKitTool {
         if (Test-Path -LiteralPath $binRoot) {
             $versionDirs = Get-ChildItem -LiteralPath $binRoot -Directory -ErrorAction SilentlyContinue |
                 Where-Object { $_.Name -match '^\d+(\.\d+)+$' } |
-                Sort-Object Name -Descending
+                Sort-Object { [version]$_.Name } -Descending
 
             foreach ($versionDir in $versionDirs) {
                 foreach ($arch in $Architectures) {
