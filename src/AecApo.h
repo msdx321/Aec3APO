@@ -13,7 +13,6 @@
 #include "AecApoDll_h.h"
 
 #include <commonmacros.h>
-#include <mmdeviceapi.h>
 
 #include <audioengineextensionapo.h>
 #include <vector>
@@ -174,8 +173,6 @@ public:
     AecSampleFormat m_inputSampleFormat = AecSampleFormat::kUnknown;
     AecSampleFormat m_outputSampleFormat = AecSampleFormat::kUnknown;
     AecSampleFormat m_renderSampleFormat = AecSampleFormat::kUnknown;
-
-    CComPtr<IMMDevice> m_spLoopbackDevice;
 
 private:
     enum class ReferenceLookupStatus

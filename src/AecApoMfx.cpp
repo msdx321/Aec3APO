@@ -11,6 +11,7 @@
 #include <mmreg.h>
 #include <windows.h>
 #include <initguid.h>
+#include <mmdeviceapi.h>
 #include <audioenginebaseapo.h>
 #include <baseaudioprocessingobject.h>
 #include <resource.h>
@@ -1660,17 +1661,14 @@ CAecApoMFX::AddAuxiliaryInput(
         //
         APOInitSystemEffects3 *papoSysFxInit3 = reinterpret_cast<APOInitSystemEffects3 *>(pbyData);
 
-        // Register for notification in GetApoNotificationRegistrationInfo
-
-        // Keep a reference to the loopback device that will be registering for endpoint volume notifications.
-
         IF_TRUE_ACTION_JUMP(papoSysFxInit3->pDeviceCollection == nullptr, hResult = E_INVALIDARG, Exit);
         UINT32 numDevices;
         hResult = papoSysFxInit3->pDeviceCollection->GetCount(&numDevices);
         IF_FAILED_JUMP(hResult, Exit);
         IF_TRUE_ACTION_JUMP(numDevices <= 0, hResult = E_INVALIDARG, Exit);
 
-        hResult = papoSysFxInit3->pDeviceCollection->Item(numDevices - 1, &m_spLoopbackDevice);
+        CComPtr<IMMDevice> loopbackDevice;
+        hResult = papoSysFxInit3->pDeviceCollection->Item(numDevices - 1, &loopbackDevice);
         IF_FAILED_JUMP(hResult, Exit);
     }
     else
@@ -1703,7 +1701,6 @@ CAecApoMFX::RemoveAuxiliaryInput(DWORD dwInputId)
     m_renderSampleRateHz = 0;
     m_renderSampleFormat = AecSampleFormat::kUnknown;
     m_renderResampler.reset();
-    m_spLoopbackDevice.Release();
     ResetRenderReferenceState();
 
     // Signal to AEC algorithm that there is no longer any reference audio stream
@@ -1826,22 +1823,6 @@ STDMETHODIMP CAecApoMFX::GetApoNotificationRegistrationInfo(_Out_writes_(*count)
     // Placeholder: no endpoint notifications yet.
 
     return S_OK;
-}
-
-static bool IsSameEndpointId(IMMDevice *device1, IMMDevice *device2)
-{
-    bool isSameEndpointId = false;
-
-    CComHeapPtr<WCHAR> deviceId1;
-    if (SUCCEEDED(device1->GetId(&deviceId1)))
-    {
-        CComHeapPtr<WCHAR> deviceId2;
-        if (SUCCEEDED(device2->GetId(&deviceId2)))
-        {
-            isSameEndpointId = (CompareStringOrdinal(deviceId1, -1, deviceId2, -1, TRUE) == CSTR_EQUAL);
-        }
-    }
-    return isSameEndpointId;
 }
 
 // HandleNotification is called whenever there is a change that matches any of the
