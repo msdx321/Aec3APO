@@ -43,47 +43,41 @@ extern "C" void speex_echo_state_destroy(SpeexEchoState *st);
 extern "C" void speex_resampler_destroy(SpeexResamplerState *st);
 extern "C" void rnnoise_destroy(DenoiseState *st);
 
-// RAII wrappers for Speex resources using unique_ptr with custom deleters
-namespace SpeexRAII
+// RAII wrappers for Speex and RNNoise resources using unique_ptr with custom deleters
+namespace ResourceRAII
 {
-    struct EchoStateDeleter
+    template <typename T, void (*Destroy)(T *)>
+    struct Destroyer
     {
-        void operator()(SpeexEchoState *state) const
+        void operator()(T *state) const noexcept
         {
-            if (state)
-                speex_echo_state_destroy(state);
+            if (state != nullptr)
+            {
+                Destroy(state);
+            }
         }
     };
+}
 
-    using EchoStatePtr = std::unique_ptr<SpeexEchoState, EchoStateDeleter>;
+namespace SpeexRAII
+{
+    using EchoStatePtr = std::unique_ptr<
+        SpeexEchoState,
+        ResourceRAII::Destroyer<SpeexEchoState, speex_echo_state_destroy>>;
 }
 
 namespace SpeexResamplerRAII
 {
-    struct ResamplerStateDeleter
-    {
-        void operator()(SpeexResamplerState *state) const
-        {
-            if (state)
-                speex_resampler_destroy(state);
-        }
-    };
-
-    using ResamplerStatePtr = std::unique_ptr<SpeexResamplerState, ResamplerStateDeleter>;
+    using ResamplerStatePtr = std::unique_ptr<
+        SpeexResamplerState,
+        ResourceRAII::Destroyer<SpeexResamplerState, speex_resampler_destroy>>;
 }
 
 namespace RnnoiseRAII
 {
-    struct DenoiseStateDeleter
-    {
-        void operator()(DenoiseState *state) const
-        {
-            if (state)
-                rnnoise_destroy(state);
-        }
-    };
-
-    using DenoiseStatePtr = std::unique_ptr<DenoiseState, DenoiseStateDeleter>;
+    using DenoiseStatePtr = std::unique_ptr<
+        DenoiseState,
+        ResourceRAII::Destroyer<DenoiseState, rnnoise_destroy>>;
 }
 
 #pragma AVRT_VTABLES_BEGIN
