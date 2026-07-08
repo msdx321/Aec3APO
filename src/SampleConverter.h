@@ -8,8 +8,9 @@
 
 #pragma once
 
-#include <cstdint>
 #include <algorithm>
+#include <cstddef>
+#include <cstdint>
 #include <type_traits>
 
 namespace AudioSampleConverter
@@ -37,6 +38,7 @@ namespace AudioSampleConverter
     constexpr float kInt32MinValue = -2147483648.0f;
 
     // PCM24 bit manipulation constants
+    constexpr size_t kPcm24PackedBytes = 3;
     constexpr int32_t kPcm24SignBit = 0x800000;
     constexpr int32_t kPcm24SignExtensionMask = ~0xFFFFFF;
 
@@ -140,21 +142,29 @@ namespace AudioSampleConverter
         return static_cast<int32_t>(sample);
     }
 
-    inline int32_t ReadPcm24PackedSample(const uint8_t *data, size_t sampleIndex)
+    inline int32_t ReadPcm24PackedSample(const uint8_t *src)
     {
-        const uint8_t *src = data + (sampleIndex * 3);
         const int32_t value = static_cast<int32_t>(src[0]) |
                               (static_cast<int32_t>(src[1]) << 8) |
                               (static_cast<int32_t>(src[2]) << 16);
         return SignExtend24(value);
     }
 
-    inline void WritePcm24PackedSample(uint8_t *data, size_t sampleIndex, int32_t value)
+    inline int32_t ReadPcm24PackedSample(const uint8_t *data, size_t sampleIndex)
     {
-        uint8_t *dst = data + (sampleIndex * 3);
+        return ReadPcm24PackedSample(data + (sampleIndex * kPcm24PackedBytes));
+    }
+
+    inline void WritePcm24PackedSample(uint8_t *dst, int32_t value)
+    {
         dst[0] = static_cast<uint8_t>(value & 0xFF);
         dst[1] = static_cast<uint8_t>((value >> 8) & 0xFF);
         dst[2] = static_cast<uint8_t>((value >> 16) & 0xFF);
+    }
+
+    inline void WritePcm24PackedSample(uint8_t *data, size_t sampleIndex, int32_t value)
+    {
+        WritePcm24PackedSample(data + (sampleIndex * kPcm24PackedBytes), value);
     }
 
     template <typename ConvertFunc>
@@ -423,10 +433,12 @@ namespace AudioSampleConverter
             // Average all channels to mono
             for (uint32_t frame = 0; frame < frames; ++frame)
             {
+                const uint8_t *samplePtr =
+                    in + (static_cast<size_t>(frame) * channels * kPcm24PackedBytes);
                 float sum = 0.0f;
-                for (uint32_t ch = 0; ch < channels; ++ch)
+                for (uint32_t ch = 0; ch < channels; ++ch, samplePtr += kPcm24PackedBytes)
                 {
-                    int32_t sample = ReadPcm24PackedSample(in, frame * channels + ch);
+                    const int32_t sample = ReadPcm24PackedSample(samplePtr);
                     sum += ConverterTraits<int32_t>::ToFloat24(sample);
                 }
                 out[frame] = sum / static_cast<float>(channels);
@@ -437,7 +449,9 @@ namespace AudioSampleConverter
             // Extract first channel only
             for (uint32_t frame = 0; frame < frames; ++frame)
             {
-                int32_t sample = ReadPcm24PackedSample(in, frame * channels);
+                const uint8_t *samplePtr =
+                    in + (static_cast<size_t>(frame) * channels * kPcm24PackedBytes);
+                const int32_t sample = ReadPcm24PackedSample(samplePtr);
                 out[frame] = ConverterTraits<int32_t>::ToFloat24(sample);
             }
         }
@@ -459,8 +473,10 @@ namespace AudioSampleConverter
             // Mono output - direct conversion
             for (uint32_t frame = 0; frame < frames; ++frame)
             {
-                int32_t value = ConverterTraits<int32_t>::FromFloat24(in[frame]);
-                WritePcm24PackedSample(out, frame, value);
+                const int32_t value = ConverterTraits<int32_t>::FromFloat24(in[frame]);
+                WritePcm24PackedSample(
+                    out + (static_cast<size_t>(frame) * kPcm24PackedBytes),
+                    value);
             }
         }
         else
@@ -468,10 +484,12 @@ namespace AudioSampleConverter
             // Multi-channel output - replicate mono to all channels
             for (uint32_t frame = 0; frame < frames; ++frame)
             {
-                int32_t value = ConverterTraits<int32_t>::FromFloat24(in[frame]);
-                for (uint32_t ch = 0; ch < channels; ++ch)
+                const int32_t value = ConverterTraits<int32_t>::FromFloat24(in[frame]);
+                uint8_t *samplePtr =
+                    out + (static_cast<size_t>(frame) * channels * kPcm24PackedBytes);
+                for (uint32_t ch = 0; ch < channels; ++ch, samplePtr += kPcm24PackedBytes)
                 {
-                    WritePcm24PackedSample(out, frame * channels + ch, value);
+                    WritePcm24PackedSample(samplePtr, value);
                 }
             }
         }
