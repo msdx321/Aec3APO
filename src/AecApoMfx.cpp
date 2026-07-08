@@ -989,23 +989,27 @@ void CAecApoMFX::InitializeRnnoiseProcessors()
     m_rnnoiseVadGraceSamplesRemaining = 0;
 
     m_rnnoiseFrameSize = rnnoise_get_frame_size();
-    if (m_rnnoiseFrameSize > 0)
+    if (m_rnnoiseFrameSize <= 0)
     {
-        m_rnnoiseState.reset(rnnoise_create(nullptr));
-        m_rnnoiseInputScratch.assign(m_rnnoiseFrameSize, 0.0f);
-        m_rnnoiseOutputScratch.assign(m_rnnoiseFrameSize, 0.0f);
-        m_rnnoiseVadGraceSamplesRemaining = (kRnnoiseSampleRateHz * kRnnoiseVadGraceMs) / 1000;
+        return;
+    }
 
-        if (m_sampleRateHz != kRnnoiseSampleRateHz)
-        {
-            m_rnnoiseResamplerIn = CreateSpeexFloatResampler(m_sampleRateHz, kRnnoiseSampleRateHz);
-            m_rnnoiseResamplerOut = CreateSpeexFloatResampler(kRnnoiseSampleRateHz, m_sampleRateHz);
-            if (!m_rnnoiseResamplerIn || !m_rnnoiseResamplerOut)
-            {
-                m_rnnoiseResamplerIn.reset();
-                m_rnnoiseResamplerOut.reset();
-            }
-        }
+    m_rnnoiseState.reset(rnnoise_create(nullptr));
+    m_rnnoiseInputScratch.assign(m_rnnoiseFrameSize, 0.0f);
+    m_rnnoiseOutputScratch.assign(m_rnnoiseFrameSize, 0.0f);
+    m_rnnoiseVadGraceSamplesRemaining = (kRnnoiseSampleRateHz * kRnnoiseVadGraceMs) / 1000;
+
+    if (m_sampleRateHz == kRnnoiseSampleRateHz)
+    {
+        return;
+    }
+
+    m_rnnoiseResamplerIn = CreateSpeexFloatResampler(m_sampleRateHz, kRnnoiseSampleRateHz);
+    m_rnnoiseResamplerOut = CreateSpeexFloatResampler(kRnnoiseSampleRateHz, m_sampleRateHz);
+    if (!m_rnnoiseResamplerIn || !m_rnnoiseResamplerOut)
+    {
+        m_rnnoiseResamplerIn.reset();
+        m_rnnoiseResamplerOut.reset();
     }
 }
 
