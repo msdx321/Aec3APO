@@ -30,15 +30,9 @@
 //
 #pragma warning(push)
 #pragma warning(disable : 4324) // structure was padded due to alignment specifier
-struct SampleFifo
+class SampleFifo
 {
-    std::vector<float> buffer;
-
-    // Cache-line aligned atomics to prevent false sharing
-    alignas(64) std::atomic<size_t> read{0};
-    alignas(64) std::atomic<size_t> write{0};
-    size_t capacity = 0;
-
+public:
     SampleFifo() = default;
 
     SampleFifo(const SampleFifo &) = delete;
@@ -50,48 +44,6 @@ struct SampleFifo
         capacity = cap;
         read.store(0, std::memory_order_relaxed);
         write.store(0, std::memory_order_relaxed);
-    }
-
-    static size_t UsedSamples(size_t currentRead, size_t currentWrite, size_t maxCapacity)
-    {
-        if (currentWrite < currentRead)
-        {
-            return 0;
-        }
-
-        return (std::min)(currentWrite - currentRead, maxCapacity);
-    }
-
-    static void CopyIntoCircularBuffer(float *destination,
-                                       size_t destinationCapacity,
-                                       size_t destinationOffset,
-                                       const float *source,
-                                       size_t samples)
-    {
-        const size_t firstChunk = (std::min)(samples, destinationCapacity - destinationOffset);
-        std::copy_n(source, firstChunk, destination + destinationOffset);
-
-        if (samples > firstChunk)
-        {
-            const size_t secondChunk = samples - firstChunk;
-            std::copy_n(source + firstChunk, secondChunk, destination);
-        }
-    }
-
-    static void CopyFromCircularBuffer(float *destination,
-                                       const float *source,
-                                       size_t sourceCapacity,
-                                       size_t sourceOffset,
-                                       size_t samples)
-    {
-        const size_t firstChunk = (std::min)(samples, sourceCapacity - sourceOffset);
-        std::copy_n(source + sourceOffset, firstChunk, destination);
-
-        if (samples > firstChunk)
-        {
-            const size_t secondChunk = samples - firstChunk;
-            std::copy_n(source, secondChunk, destination + firstChunk);
-        }
     }
 
     // Producer only
@@ -152,5 +104,55 @@ struct SampleFifo
 
         return toRead;
     }
+
+private:
+    static size_t UsedSamples(size_t currentRead, size_t currentWrite, size_t maxCapacity)
+    {
+        if (currentWrite < currentRead)
+        {
+            return 0;
+        }
+
+        return (std::min)(currentWrite - currentRead, maxCapacity);
+    }
+
+    static void CopyIntoCircularBuffer(float *destination,
+                                       size_t destinationCapacity,
+                                       size_t destinationOffset,
+                                       const float *source,
+                                       size_t samples)
+    {
+        const size_t firstChunk = (std::min)(samples, destinationCapacity - destinationOffset);
+        std::copy_n(source, firstChunk, destination + destinationOffset);
+
+        if (samples > firstChunk)
+        {
+            const size_t secondChunk = samples - firstChunk;
+            std::copy_n(source + firstChunk, secondChunk, destination);
+        }
+    }
+
+    static void CopyFromCircularBuffer(float *destination,
+                                       const float *source,
+                                       size_t sourceCapacity,
+                                       size_t sourceOffset,
+                                       size_t samples)
+    {
+        const size_t firstChunk = (std::min)(samples, sourceCapacity - sourceOffset);
+        std::copy_n(source + sourceOffset, firstChunk, destination);
+
+        if (samples > firstChunk)
+        {
+            const size_t secondChunk = samples - firstChunk;
+            std::copy_n(source, secondChunk, destination + firstChunk);
+        }
+    }
+
+    std::vector<float> buffer;
+
+    // Cache-line aligned atomics to prevent false sharing
+    alignas(64) std::atomic<size_t> read{0};
+    alignas(64) std::atomic<size_t> write{0};
+    size_t capacity = 0;
 };
 #pragma warning(pop)
