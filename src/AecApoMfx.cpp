@@ -874,8 +874,8 @@ HRESULT CAecApoMFX::ValidateAndSetupFormats(
     APO_CONNECTION_DESCRIPTOR **ppOutputConnections)
 {
     HRESULT hr = S_OK;
-    UNCOMPRESSEDAUDIOFORMAT uncompAudioFormat;
-    UNCOMPRESSEDAUDIOFORMAT uncompInputFormat;
+    UNCOMPRESSEDAUDIOFORMAT uncompAudioFormat = {};
+    UNCOMPRESSEDAUDIOFORMAT uncompInputFormat = {};
 
     hr = ppOutputConnections[0]->pFormat->GetUncompressedAudioFormat(&uncompAudioFormat);
     IF_FAILED_JUMP(hr, Exit);
