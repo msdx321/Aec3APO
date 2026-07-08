@@ -320,6 +320,12 @@ namespace AudioSampleConverter
         // AVX2 fast path for float stereo averaging
         if constexpr (std::is_same_v<T, float>)
         {
+            if (channels == 1)
+            {
+                std::copy_n(in, frames, out);
+                return;
+            }
+
             if (averageChannels && channels == 2)
             {
                 SIMD::ExtractStereoToMono_Float_AVX2(
@@ -370,6 +376,12 @@ namespace AudioSampleConverter
         // AVX2 fast path for float stereo replication
         if constexpr (std::is_same_v<T, float>)
         {
+            if (channels == 1)
+            {
+                std::copy_n(in, frames, static_cast<float *>(output));
+                return;
+            }
+
             if (channels == 2)
             {
                 SIMD::WriteMonoToStereo_Float_AVX2(
