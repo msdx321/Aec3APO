@@ -8,11 +8,8 @@
 
 #include <atlbase.h>
 #include <atlcom.h>
-#include <atlcoll.h>
-#include <atlsync.h>
 #include <mmreg.h>
 #include <windows.h>
-#include <strsafe.h>
 #include <initguid.h>
 #include <audioenginebaseapo.h>
 #include <baseaudioprocessingobject.h>
@@ -26,7 +23,6 @@
 #include "AecApo.h"
 #include "SampleConverter.h"
 #include "SampleConverterSIMD.h"
-#include <devicetopology.h>
 
 #include "speex/speex_echo.h"
 #include "speex/speex_resampler.h"
