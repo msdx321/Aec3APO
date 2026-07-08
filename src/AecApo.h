@@ -216,7 +216,7 @@ private:
     // Helper method for APOProcess
     bool HasRealtimeScratchCapacity(UINT32 frames) const;
     void WriteSilentOutput(APO_CONNECTION_PROPERTY *outputConnection, void *outputBuffer, UINT32 frames) const;
-    void WriteBypassOutput(void *outputBuffer, UINT32 frames);
+    void WriteBypassOutput(void *outputBuffer, UINT32 frames) const;
     APO_BUFFER_FLAGS WriteProcessedOutput(void *outputBuffer,
                                           UINT32 frames,
                                           UINT64 inputQpc,

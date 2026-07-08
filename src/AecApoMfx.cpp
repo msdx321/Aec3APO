@@ -1042,7 +1042,7 @@ void CAecApoMFX::WriteSilentOutput(APO_CONNECTION_PROPERTY *outputConnection, vo
     outputConnection->u32BufferFlags = BUFFER_SILENT;
 }
 
-void CAecApoMFX::WriteBypassOutput(void *outputBuffer, UINT32 frames)
+void CAecApoMFX::WriteBypassOutput(void *outputBuffer, UINT32 frames) const
 {
     WriteMonoSamples(outputBuffer,
                      m_outputSampleFormat,
@@ -1066,9 +1066,9 @@ APO_BUFFER_FLAGS CAecApoMFX::WriteProcessedOutput(void *outputBuffer,
     }
     if (produced < frames)
     {
-        std::copy(m_captureScratch.begin() + produced,
-                  m_captureScratch.begin() + frames,
-                  m_outputScratch.begin() + produced);
+        std::copy_n(m_captureScratch.begin() + produced,
+                    frames - produced,
+                    m_outputScratch.begin() + produced);
     }
 
     WriteMonoSamples(outputBuffer,
