@@ -27,7 +27,7 @@
 // Thread Safety:
 // - Producer thread: Calls Push() only
 // - Consumer thread: Calls Pop() only
-// - Init() and Reset() must be called when no concurrent access is happening
+// - Init() must be called when no concurrent access is happening
 //
 #pragma warning(push)
 #pragma warning(disable : 4324) // structure was padded due to alignment specifier
@@ -84,14 +84,6 @@ struct SampleFifo
         write.store(0, std::memory_order_relaxed);
     }
 
-    void Reset()
-    {
-        read.store(0, std::memory_order_relaxed);
-        write.store(0, std::memory_order_relaxed);
-    }
-
-    size_t Capacity() const { return capacity; }
-
     static size_t UsedSamples(size_t currentRead, size_t currentWrite, size_t maxCapacity)
     {
         if (currentWrite < currentRead)
@@ -132,13 +124,6 @@ struct SampleFifo
             const size_t secondChunk = samples - firstChunk;
             std::copy_n(source, secondChunk, destination + firstChunk);
         }
-    }
-
-    size_t Count() const
-    {
-        const size_t currentRead = read.load(std::memory_order_acquire);
-        const size_t currentWrite = write.load(std::memory_order_acquire);
-        return UsedSamples(currentRead, currentWrite, capacity);
     }
 
     // Producer only
