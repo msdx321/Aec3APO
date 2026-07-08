@@ -48,7 +48,7 @@ function Find-WindowsKitTool {
             }
         }
 
-        $candidate = Get-ChildItem -LiteralPath $root -Recurse -Filter $ToolName -ErrorAction SilentlyContinue |
+        $candidate = Get-ChildItem -LiteralPath $root -Recurse -File -Filter $ToolName -ErrorAction SilentlyContinue |
             Sort-Object FullName -Descending |
             Select-Object -First 1
         if ($candidate) {
