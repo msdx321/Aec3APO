@@ -1021,8 +1021,9 @@ void CAecApoMFX::InitializeRnnoiseProcessors()
 
 bool CAecApoMFX::HasRealtimeScratchCapacity(UINT32 frames) const
 {
-    return frames <= m_captureScratch.size() &&
-           frames <= m_outputScratch.size();
+    const size_t frameCount = frames;
+    return frameCount <= m_captureScratch.size() &&
+           frameCount <= m_outputScratch.size();
 }
 
 void CAecApoMFX::WriteSilentOutput(APO_CONNECTION_PROPERTY *outputConnection, void *outputBuffer, UINT32 frames) const
@@ -1051,18 +1052,19 @@ APO_BUFFER_FLAGS CAecApoMFX::WriteProcessedOutput(void *outputBuffer,
                                                   UINT64 inputQpc,
                                                   APO_BUFFER_FLAGS outputBufferFlags)
 {
+    const size_t frameCount = frames;
     QueueCaptureSamples(m_captureScratch.data(), frames, inputQpc);
 
     // Emit processed samples; if not enough yet, fall back to input.
-    const size_t produced = m_outputFifo.Pop(m_outputScratch.data(), frames);
+    const size_t produced = m_outputFifo.Pop(m_outputScratch.data(), frameCount);
     if (produced > 0)
     {
         outputBufferFlags = BUFFER_VALID;
     }
-    if (produced < frames)
+    if (produced < frameCount)
     {
         std::copy_n(m_captureScratch.begin() + produced,
-                    frames - produced,
+                    frameCount - produced,
                     m_outputScratch.begin() + produced);
     }
 
