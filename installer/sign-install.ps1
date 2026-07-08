@@ -145,7 +145,7 @@ if (-not (Test-Administrator)) {
 }
 
 if (-not (Test-Path -LiteralPath $DriverDir)) {
-    New-Item -ItemType Directory -Path $DriverDir | Out-Null
+    New-Item -ItemType Directory -LiteralPath $DriverDir | Out-Null
 }
 
 $sourceDll = $null
