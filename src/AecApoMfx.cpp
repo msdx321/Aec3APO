@@ -106,6 +106,51 @@ namespace
         return static_cast<float>(sum / static_cast<double>(sampleCount));
     }
 
+    template <typename QpcTicksForSamples, typename FrameReady>
+    static void QueueAssembledFrames(const float *samples,
+                                     size_t sampleCount,
+                                     UINT64 firstSampleQpc,
+                                     size_t frameSize,
+                                     std::vector<float> &assemblyScratch,
+                                     size_t &assemblyCount,
+                                     UINT64 &assemblyStartQpc,
+                                     QpcTicksForSamples qpcTicksForSamples,
+                                     FrameReady frameReady)
+    {
+        if (samples == nullptr || sampleCount == 0 || frameSize == 0 || assemblyScratch.size() < frameSize)
+        {
+            return;
+        }
+
+        UINT64 currentSampleQpc = firstSampleQpc;
+        while (sampleCount > 0)
+        {
+            if (assemblyCount == 0)
+            {
+                assemblyStartQpc = currentSampleQpc;
+            }
+
+            const size_t remaining = frameSize - assemblyCount;
+            const size_t chunk = (std::min)(sampleCount, remaining);
+            std::copy_n(samples, chunk, assemblyScratch.data() + assemblyCount);
+
+            assemblyCount += chunk;
+            samples += chunk;
+            sampleCount -= chunk;
+            if (currentSampleQpc != 0)
+            {
+                currentSampleQpc += qpcTicksForSamples(chunk);
+            }
+
+            if (assemblyCount == frameSize)
+            {
+                frameReady(assemblyScratch.data(), assemblyStartQpc);
+                assemblyCount = 0;
+                assemblyStartQpc = 0;
+            }
+        }
+    }
+
     struct RequestedFormatInfo
     {
         float sampleRate = static_cast<float>(kDefaultSampleRateHz);
@@ -459,38 +504,22 @@ void CAecApoMFX::ProcessCaptureFrame(const float *frameData, UINT64 captureFrame
 
 void CAecApoMFX::QueueCaptureSamples(const float *samples, size_t sampleCount, UINT64 firstSampleQpc)
 {
-    if (samples == nullptr || sampleCount == 0 || m_frameSize == 0 || m_captureAssemblyScratch.size() < m_frameSize)
-    {
-        return;
-    }
-
-    UINT64 currentSampleQpc = firstSampleQpc;
-    while (sampleCount > 0)
-    {
-        if (m_captureAssemblyCount == 0)
+    QueueAssembledFrames(
+        samples,
+        sampleCount,
+        firstSampleQpc,
+        m_frameSize,
+        m_captureAssemblyScratch,
+        m_captureAssemblyCount,
+        m_captureAssemblyStartQpc,
+        [this](size_t chunk)
         {
-            m_captureAssemblyStartQpc = currentSampleQpc;
-        }
-
-        const size_t remaining = m_frameSize - m_captureAssemblyCount;
-        const size_t chunk = (std::min)(sampleCount, remaining);
-        std::copy_n(samples, chunk, m_captureAssemblyScratch.data() + m_captureAssemblyCount);
-
-        m_captureAssemblyCount += chunk;
-        samples += chunk;
-        sampleCount -= chunk;
-        if (currentSampleQpc != 0)
+            return SamplesToQpcTicks(chunk, m_sampleRateHz);
+        },
+        [this](const float *frameData, UINT64 frameStartQpc)
         {
-            currentSampleQpc += SamplesToQpcTicks(chunk, m_sampleRateHz);
-        }
-
-        if (m_captureAssemblyCount == m_frameSize)
-        {
-            ProcessCaptureFrame(m_captureAssemblyScratch.data(), m_captureAssemblyStartQpc);
-            m_captureAssemblyCount = 0;
-            m_captureAssemblyStartQpc = 0;
-        }
-    }
+            ProcessCaptureFrame(frameData, frameStartQpc);
+        });
 }
 
 void CAecApoMFX::PublishRenderReferenceFrame(const float *frameData, UINT64 frameStartQpc)
@@ -519,38 +548,22 @@ void CAecApoMFX::PublishRenderReferenceFrame(const float *frameData, UINT64 fram
 
 void CAecApoMFX::QueueRenderReferenceSamples(const float *samples, size_t sampleCount, UINT64 firstSampleQpc)
 {
-    if (samples == nullptr || sampleCount == 0 || m_frameSize == 0 || m_renderAssemblyScratch.size() < m_frameSize)
-    {
-        return;
-    }
-
-    UINT64 currentSampleQpc = firstSampleQpc;
-    while (sampleCount > 0)
-    {
-        if (m_renderAssemblyCount == 0)
+    QueueAssembledFrames(
+        samples,
+        sampleCount,
+        firstSampleQpc,
+        m_frameSize,
+        m_renderAssemblyScratch,
+        m_renderAssemblyCount,
+        m_renderAssemblyStartQpc,
+        [this](size_t chunk)
         {
-            m_renderAssemblyStartQpc = currentSampleQpc;
-        }
-
-        const size_t remaining = m_frameSize - m_renderAssemblyCount;
-        const size_t chunk = (std::min)(sampleCount, remaining);
-        std::copy_n(samples, chunk, m_renderAssemblyScratch.data() + m_renderAssemblyCount);
-
-        m_renderAssemblyCount += chunk;
-        samples += chunk;
-        sampleCount -= chunk;
-        if (currentSampleQpc != 0)
+            return SamplesToQpcTicks(chunk, m_sampleRateHz);
+        },
+        [this](const float *frameData, UINT64 frameStartQpc)
         {
-            currentSampleQpc += SamplesToQpcTicks(chunk, m_sampleRateHz);
-        }
-
-        if (m_renderAssemblyCount == m_frameSize)
-        {
-            PublishRenderReferenceFrame(m_renderAssemblyScratch.data(), m_renderAssemblyStartQpc);
-            m_renderAssemblyCount = 0;
-            m_renderAssemblyStartQpc = 0;
-        }
-    }
+            PublishRenderReferenceFrame(frameData, frameStartQpc);
+        });
 }
 
 CAecApoMFX::ReferenceLookupStatus CAecApoMFX::TryGetRenderReferenceFrame(UINT64 captureQpc,
