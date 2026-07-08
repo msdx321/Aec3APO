@@ -811,11 +811,8 @@ void CAecApoMFX::RunRnnoiseFrame()
     }
     else if (m_rnnoiseVadGraceSamplesRemaining > 0)
     {
-        m_rnnoiseVadGraceSamplesRemaining -= m_rnnoiseFrameSize;
-        if (m_rnnoiseVadGraceSamplesRemaining < 0)
-        {
-            m_rnnoiseVadGraceSamplesRemaining = 0;
-        }
+        m_rnnoiseVadGraceSamplesRemaining =
+            (std::max)(0, m_rnnoiseVadGraceSamplesRemaining - m_rnnoiseFrameSize);
     }
 
     // AVX2-optimized PCM scale down
