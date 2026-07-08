@@ -1506,6 +1506,25 @@ CreatePreferredOutputMediaType(IAudioMediaType **ppMediaType,
     return CreateAudioMediaTypeFromUncompressedAudioFormat(&format, ppMediaType);
 }
 
+static HRESULT CreatePreferredInputMediaTypeForRequest(IAudioMediaType *requestedInputFormat,
+                                                       IAudioMediaType **supportedInputFormat)
+{
+    const RequestedFormatInfo requestedInfo = GetRequestedFormatInfo(requestedInputFormat);
+    return CreatePreferredInputMediaType(supportedInputFormat,
+                                         requestedInfo.channelCount,
+                                         requestedInfo.sampleRate,
+                                         requestedInfo.sampleFormat);
+}
+
+static HRESULT CreatePreferredOutputMediaTypeForRequest(IAudioMediaType *requestedOutputFormat,
+                                                        IAudioMediaType **supportedOutputFormat)
+{
+    const RequestedFormatInfo requestedInfo = GetRequestedFormatInfo(requestedOutputFormat);
+    return CreatePreferredOutputMediaType(supportedOutputFormat,
+                                          requestedInfo.sampleRate,
+                                          requestedInfo.sampleFormat);
+}
+
 //-------------------------------------------------------------------------
 // Description:
 //
@@ -1559,11 +1578,7 @@ STDMETHODIMP CAecApoMFX::IsInputFormatSupported(IAudioMediaType *pOutputFormat, 
 
     if (!bSupported)
     {
-        const RequestedFormatInfo requestedInfo = GetRequestedFormatInfo(pRequestedInputFormat);
-        hResult = CreatePreferredInputMediaType(ppSupportedInputFormat,
-                                                requestedInfo.channelCount,
-                                                requestedInfo.sampleRate,
-                                                requestedInfo.sampleFormat);
+        hResult = CreatePreferredInputMediaTypeForRequest(pRequestedInputFormat, ppSupportedInputFormat);
         IF_FAILED_JUMP(hResult, Exit);
         return S_FALSE;
     }
@@ -1619,10 +1634,7 @@ STDMETHODIMP CAecApoMFX::IsOutputFormatSupported(IAudioMediaType *pInputFormat, 
 
     if (!bSupported)
     {
-        const RequestedFormatInfo requestedInfo = GetRequestedFormatInfo(pRequestedOutputFormat);
-        hResult = CreatePreferredOutputMediaType(ppSupportedOutputFormat,
-                                                 requestedInfo.sampleRate,
-                                                 requestedInfo.sampleFormat);
+        hResult = CreatePreferredOutputMediaTypeForRequest(pRequestedOutputFormat, ppSupportedOutputFormat);
         IF_FAILED_JUMP(hResult, Exit);
         return S_FALSE;
     }
@@ -1744,11 +1756,7 @@ CAecApoMFX::IsInputFormatSupported(IAudioMediaType *pRequestedInputFormat,
 
     if (!bSupported)
     {
-        const RequestedFormatInfo requestedInfo = GetRequestedFormatInfo(pRequestedInputFormat);
-        hResult = CreatePreferredInputMediaType(ppSupportedInputFormat,
-                                                requestedInfo.channelCount,
-                                                requestedInfo.sampleRate,
-                                                requestedInfo.sampleFormat);
+        hResult = CreatePreferredInputMediaTypeForRequest(pRequestedInputFormat, ppSupportedInputFormat);
         IF_FAILED_JUMP(hResult, Exit);
         return S_FALSE;
     }
