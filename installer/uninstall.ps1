@@ -136,6 +136,26 @@ function Get-PublishedDriverNames {
         Select-Object -ExpandProperty PublishedName -Unique
 }
 
+function Invoke-DeleteDriverPackage {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$PublishedName,
+        [Parameter(Mandatory=$true)]
+        [string]$InfName,
+        [switch]$Force
+    )
+
+    $arguments = @("/delete-driver", $PublishedName, "/uninstall")
+    if ($Force) {
+        $arguments += "/force"
+    }
+
+    & pnputil @arguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to delete driver package $PublishedName for $InfName."
+    }
+}
+
 if (-not (Test-Administrator)) {
     throw "This script must be run in an elevated PowerShell to uninstall drivers and update certificate stores."
 }
@@ -156,14 +176,7 @@ foreach ($inf in $infPaths) {
     }
 
     foreach ($name in $publishedNames) {
-        if ($Force) {
-            & pnputil /delete-driver $name /uninstall /force
-        } else {
-            & pnputil /delete-driver $name /uninstall
-        }
-        if ($LASTEXITCODE -ne 0) {
-            throw "Failed to delete driver package $name for $infName."
-        }
+        Invoke-DeleteDriverPackage -PublishedName $name -InfName $infName -Force:$Force
     }
 }
 
