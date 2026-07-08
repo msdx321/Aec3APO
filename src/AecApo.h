@@ -97,7 +97,7 @@ public:
         : CBaseAudioProcessingObject(sm_RegProperties)
     {
     }
-    ~CAecApoMFX();
+    ~CAecApoMFX() = default;
 
     DECLARE_REGISTRY_RESOURCEID(IDR_AECAPOMFX)
 

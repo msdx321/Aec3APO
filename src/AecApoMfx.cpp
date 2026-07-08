@@ -28,11 +28,6 @@
 #include "speex/speex_resampler.h"
 #include "rnnoise.h"
 
-CAecApoMFX::~CAecApoMFX()
-{
-    // RAII unique_ptr handles cleanup automatically
-}
-
 static AecSampleFormat GetAecSampleFormat(const UNCOMPRESSEDAUDIOFORMAT &format);
 static UINT32 GetBytesPerSample(AecSampleFormat format);
 static UINT32 GetValidBitsPerSample(AecSampleFormat format);
