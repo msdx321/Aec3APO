@@ -106,6 +106,19 @@ namespace
         return static_cast<float>(sum / static_cast<double>(sampleCount));
     }
 
+    static SpeexResamplerRAII::ResamplerStatePtr CreateSpeexFloatResampler(int inputRateHz, int outputRateHz)
+    {
+        int err = RESAMPLER_ERR_SUCCESS;
+        SpeexResamplerRAII::ResamplerStatePtr resampler(
+            speex_resampler_init(1, inputRateHz, outputRateHz, SPEEX_RESAMPLER_QUALITY_MAX, &err));
+        if (err != RESAMPLER_ERR_SUCCESS)
+        {
+            return {};
+        }
+
+        return resampler;
+    }
+
     template <typename QpcTicksForSamples, typename FrameReady>
     static void QueueAssembledFrames(const float *samples,
                                      size_t sampleCount,
@@ -979,18 +992,7 @@ void CAecApoMFX::InitializeRenderReferenceProcessors()
         return;
     }
 
-    int err = 0;
-    m_renderResampler.reset(speex_resampler_init(
-        1,
-        m_renderSampleRateHz,
-        m_sampleRateHz,
-        SPEEX_RESAMPLER_QUALITY_MAX,
-        &err));
-
-    if (err != RESAMPLER_ERR_SUCCESS)
-    {
-        m_renderResampler.reset();
-    }
+    m_renderResampler = CreateSpeexFloatResampler(m_renderSampleRateHz, m_sampleRateHz);
 }
 
 //
@@ -1014,11 +1016,13 @@ void CAecApoMFX::InitializeRnnoiseProcessors()
 
         if (m_sampleRateHz != kRnnoiseSampleRateHz)
         {
-            int err = 0;
-            m_rnnoiseResamplerIn.reset(speex_resampler_init(
-                1, m_sampleRateHz, kRnnoiseSampleRateHz, SPEEX_RESAMPLER_QUALITY_MAX, &err));
-            m_rnnoiseResamplerOut.reset(speex_resampler_init(
-                1, kRnnoiseSampleRateHz, m_sampleRateHz, SPEEX_RESAMPLER_QUALITY_MAX, &err));
+            m_rnnoiseResamplerIn = CreateSpeexFloatResampler(m_sampleRateHz, kRnnoiseSampleRateHz);
+            m_rnnoiseResamplerOut = CreateSpeexFloatResampler(kRnnoiseSampleRateHz, m_sampleRateHz);
+            if (!m_rnnoiseResamplerIn || !m_rnnoiseResamplerOut)
+            {
+                m_rnnoiseResamplerIn.reset();
+                m_rnnoiseResamplerOut.reset();
+            }
         }
     }
 }
