@@ -130,21 +130,11 @@ namespace AudioSampleConverter
         return SignExtend24(value);
     }
 
-    inline int32_t ReadPcm24PackedSample(const uint8_t *data, size_t sampleIndex)
-    {
-        return ReadPcm24PackedSample(data + (sampleIndex * kPcm24PackedBytes));
-    }
-
     inline void WritePcm24PackedSample(uint8_t *dst, int32_t value)
     {
         dst[0] = static_cast<uint8_t>(value & 0xFF);
         dst[1] = static_cast<uint8_t>((value >> 8) & 0xFF);
         dst[2] = static_cast<uint8_t>((value >> 16) & 0xFF);
-    }
-
-    inline void WritePcm24PackedSample(uint8_t *data, size_t sampleIndex, int32_t value)
-    {
-        WritePcm24PackedSample(data + (sampleIndex * kPcm24PackedBytes), value);
     }
 
     template <typename ConvertFunc>
