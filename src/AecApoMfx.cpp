@@ -270,30 +270,35 @@ namespace
     }
 } // namespace
 
+static bool HasSampleLayout(const UNCOMPRESSEDAUDIOFORMAT &format, UINT32 bytesPerSample, UINT32 validBitsPerSample)
+{
+    return format.dwBytesPerSampleContainer == bytesPerSample &&
+           format.dwValidBitsPerSample == validBitsPerSample;
+}
+
 static AecSampleFormat GetAecSampleFormat(const UNCOMPRESSEDAUDIOFORMAT &format)
 {
     if (format.guidFormatType == KSDATAFORMAT_SUBTYPE_IEEE_FLOAT &&
-        format.dwBytesPerSampleContainer == 4 &&
-        format.dwValidBitsPerSample == 32)
+        HasSampleLayout(format, 4, 32))
     {
         return AecSampleFormat::kFloat32;
     }
 
     if (format.guidFormatType == KSDATAFORMAT_SUBTYPE_PCM)
     {
-        if (format.dwBytesPerSampleContainer == 2 && format.dwValidBitsPerSample == 16)
+        if (HasSampleLayout(format, 2, 16))
         {
             return AecSampleFormat::kPcm16;
         }
-        if (format.dwBytesPerSampleContainer == 3 && format.dwValidBitsPerSample == 24)
+        if (HasSampleLayout(format, 3, 24))
         {
             return AecSampleFormat::kPcm24Packed;
         }
-        if (format.dwBytesPerSampleContainer == 4 && format.dwValidBitsPerSample == 24)
+        if (HasSampleLayout(format, 4, 24))
         {
             return AecSampleFormat::kPcm24In32;
         }
-        if (format.dwBytesPerSampleContainer == 4 && format.dwValidBitsPerSample == 32)
+        if (HasSampleLayout(format, 4, 32))
         {
             return AecSampleFormat::kPcm32;
         }
