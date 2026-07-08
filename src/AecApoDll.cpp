@@ -43,14 +43,6 @@ CAecApoDllModule _AtlModule;
 // {secret}
 extern "C" BOOL WINAPI DllMain(HINSTANCE /* hInstance */, DWORD dwReason, LPVOID lpReserved)
 {
-    if (DLL_PROCESS_ATTACH == dwReason)
-    {
-    }
-    // do necessary cleanup only if the DLL is being unloaded dynamically
-    else if ((DLL_PROCESS_DETACH == dwReason) && (lpReserved == nullptr))
-    {
-    }
-
     return _AtlModule.DllMain(dwReason, lpReserved);
 }
 
