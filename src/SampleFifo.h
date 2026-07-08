@@ -11,7 +11,6 @@
 
 #include <algorithm>
 #include <atomic>
-#include <utility>
 #include <vector>
 
 //
@@ -40,39 +39,8 @@ struct SampleFifo
     alignas(64) std::atomic<size_t> write{0};
     size_t capacity = 0;
 
-    // Default constructor
     SampleFifo() = default;
 
-    // Move constructor
-    SampleFifo(SampleFifo &&other) noexcept
-        : buffer(std::move(other.buffer)),
-          read(other.read.load(std::memory_order_relaxed)),
-          write(other.write.load(std::memory_order_relaxed)),
-          capacity(other.capacity)
-    {
-        other.read.store(0, std::memory_order_relaxed);
-        other.write.store(0, std::memory_order_relaxed);
-        other.capacity = 0;
-    }
-
-    // Move assignment operator
-    SampleFifo &operator=(SampleFifo &&other) noexcept
-    {
-        if (this != &other)
-        {
-            buffer = std::move(other.buffer);
-            read.store(other.read.load(std::memory_order_relaxed), std::memory_order_relaxed);
-            write.store(other.write.load(std::memory_order_relaxed), std::memory_order_relaxed);
-            capacity = other.capacity;
-
-            other.read.store(0, std::memory_order_relaxed);
-            other.write.store(0, std::memory_order_relaxed);
-            other.capacity = 0;
-        }
-        return *this;
-    }
-
-    // Delete copy operations
     SampleFifo(const SampleFifo &) = delete;
     SampleFifo &operator=(const SampleFifo &) = delete;
 
