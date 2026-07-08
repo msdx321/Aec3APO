@@ -40,6 +40,25 @@ namespace AudioSampleConverter
     constexpr int32_t kPcm24SignBit = 0x800000;
     constexpr int32_t kPcm24SignExtensionMask = ~0xFFFFFF;
 
+    inline float ClampUnitSample(float v)
+    {
+        if (v > 1.0f)
+            return 1.0f;
+        if (v < -1.0f)
+            return -1.0f;
+        return v;
+    }
+
+    inline float ScaleAndClampSample(float v, float scaleFactor, float minValue, float maxValue)
+    {
+        float scaled = ClampUnitSample(v) * scaleFactor;
+        if (scaled > maxValue)
+            return maxValue;
+        if (scaled < minValue)
+            return minValue;
+        return scaled;
+    }
+
     //
     // Converter trait - specialized for each sample type
     //
@@ -65,16 +84,7 @@ namespace AudioSampleConverter
 
         static int16_t FromFloat(float v)
         {
-            if (v > 1.0f)
-                v = 1.0f;
-            if (v < -1.0f)
-                v = -1.0f;
-            float scaled = v * kInt16ScaleFactor;
-            if (scaled > kInt16MaxValue)
-                scaled = kInt16MaxValue;
-            if (scaled < kInt16MinValue)
-                scaled = kInt16MinValue;
-            return static_cast<int16_t>(scaled);
+            return static_cast<int16_t>(ScaleAndClampSample(v, kInt16ScaleFactor, kInt16MinValue, kInt16MaxValue));
         }
     };
 
@@ -90,16 +100,7 @@ namespace AudioSampleConverter
 
         static int32_t FromFloat32(float v)
         {
-            if (v > 1.0f)
-                v = 1.0f;
-            if (v < -1.0f)
-                v = -1.0f;
-            float scaled = v * kInt32ScaleFactor;
-            if (scaled > kInt32MaxValue)
-                scaled = kInt32MaxValue;
-            if (scaled < kInt32MinValue)
-                scaled = kInt32MinValue;
-            return static_cast<int32_t>(scaled);
+            return static_cast<int32_t>(ScaleAndClampSample(v, kInt32ScaleFactor, kInt32MinValue, kInt32MaxValue));
         }
 
         // For PCM24
@@ -110,16 +111,7 @@ namespace AudioSampleConverter
 
         static int32_t FromFloat24(float v)
         {
-            if (v > 1.0f)
-                v = 1.0f;
-            if (v < -1.0f)
-                v = -1.0f;
-            float scaled = v * kInt24ScaleFactor;
-            if (scaled > kInt24MaxValue)
-                scaled = kInt24MaxValue;
-            if (scaled < kInt24MinValue)
-                scaled = kInt24MinValue;
-            return static_cast<int32_t>(scaled);
+            return static_cast<int32_t>(ScaleAndClampSample(v, kInt24ScaleFactor, kInt24MinValue, kInt24MaxValue));
         }
 
         // Batch conversion helpers for SIMD

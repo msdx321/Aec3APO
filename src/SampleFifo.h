@@ -9,9 +9,10 @@
 
 #pragma once
 
-#include <vector>
 #include <algorithm>
 #include <atomic>
+#include <utility>
+#include <vector>
 
 //
 // SampleFifo - Lock-free circular buffer for floating-point audio samples
@@ -37,8 +38,6 @@ struct SampleFifo
     // Cache-line aligned atomics to prevent false sharing
     alignas(64) std::atomic<size_t> read{0};
     alignas(64) std::atomic<size_t> write{0};
-    alignas(64) std::atomic<size_t> count{0};
-
     size_t capacity = 0;
 
     // Default constructor
@@ -46,11 +45,13 @@ struct SampleFifo
 
     // Move constructor
     SampleFifo(SampleFifo &&other) noexcept
-        : buffer(std::move(other.buffer)), read(other.read.load(std::memory_order_relaxed)), write(other.write.load(std::memory_order_relaxed)), count(other.count.load(std::memory_order_relaxed)), capacity(other.capacity)
+        : buffer(std::move(other.buffer)),
+          read(other.read.load(std::memory_order_relaxed)),
+          write(other.write.load(std::memory_order_relaxed)),
+          capacity(other.capacity)
     {
         other.read.store(0, std::memory_order_relaxed);
         other.write.store(0, std::memory_order_relaxed);
-        other.count.store(0, std::memory_order_relaxed);
         other.capacity = 0;
     }
 
@@ -62,12 +63,10 @@ struct SampleFifo
             buffer = std::move(other.buffer);
             read.store(other.read.load(std::memory_order_relaxed), std::memory_order_relaxed);
             write.store(other.write.load(std::memory_order_relaxed), std::memory_order_relaxed);
-            count.store(other.count.load(std::memory_order_relaxed), std::memory_order_relaxed);
             capacity = other.capacity;
 
             other.read.store(0, std::memory_order_relaxed);
             other.write.store(0, std::memory_order_relaxed);
-            other.count.store(0, std::memory_order_relaxed);
             other.capacity = 0;
         }
         return *this;
@@ -83,21 +82,31 @@ struct SampleFifo
         capacity = cap;
         read.store(0, std::memory_order_relaxed);
         write.store(0, std::memory_order_relaxed);
-        count.store(0, std::memory_order_relaxed);
     }
 
     void Reset()
     {
         read.store(0, std::memory_order_relaxed);
         write.store(0, std::memory_order_relaxed);
-        count.store(0, std::memory_order_relaxed);
     }
 
     size_t Capacity() const { return capacity; }
 
+    static size_t UsedSamples(size_t currentRead, size_t currentWrite, size_t maxCapacity)
+    {
+        if (currentWrite < currentRead)
+        {
+            return 0;
+        }
+
+        return (std::min)(currentWrite - currentRead, maxCapacity);
+    }
+
     size_t Count() const
     {
-        return count.load(std::memory_order_acquire);
+        const size_t currentRead = read.load(std::memory_order_acquire);
+        const size_t currentWrite = write.load(std::memory_order_acquire);
+        return UsedSamples(currentRead, currentWrite, capacity);
     }
 
     // Producer only
@@ -114,14 +123,10 @@ struct SampleFifo
             samples = capacity;
         }
 
-        size_t currentWrite = write.load(std::memory_order_relaxed);
-        size_t currentCount = count.load(std::memory_order_acquire);
-        if (currentCount > capacity)
-        {
-            currentCount = capacity;
-        }
-
-        size_t freeSpace = capacity - currentCount;
+        const size_t currentWrite = write.load(std::memory_order_relaxed);
+        const size_t currentRead = read.load(std::memory_order_acquire);
+        const size_t used = UsedSamples(currentRead, currentWrite, capacity);
+        const size_t freeSpace = capacity - used;
         if (samples > freeSpace)
         {
             if (freeSpace == 0)
@@ -133,18 +138,17 @@ struct SampleFifo
         }
 
         // Batch copy with wrap-around handling
-        size_t firstChunk = (std::min)(samples, capacity - currentWrite);
-        std::copy_n(data, firstChunk, &buffer[currentWrite]);
+        const size_t writeOffset = currentWrite % capacity;
+        const size_t firstChunk = (std::min)(samples, capacity - writeOffset);
+        std::copy_n(data, firstChunk, buffer.data() + writeOffset);
 
         if (samples > firstChunk)
         {
-            size_t secondChunk = samples - firstChunk;
-            std::copy_n(data + firstChunk, secondChunk, &buffer[0]);
+            const size_t secondChunk = samples - firstChunk;
+            std::copy_n(data + firstChunk, secondChunk, buffer.data());
         }
 
-        size_t newWrite = (currentWrite + samples) % capacity;
-        write.store(newWrite, std::memory_order_release);
-        count.fetch_add(samples, std::memory_order_acq_rel);
+        write.store(currentWrite + samples, std::memory_order_release);
     }
 
     // Consumer only
@@ -155,28 +159,28 @@ struct SampleFifo
             return 0;
         }
 
-        size_t currentRead = read.load(std::memory_order_relaxed);
-        size_t available = count.load(std::memory_order_acquire);
+        const size_t currentRead = read.load(std::memory_order_relaxed);
+        const size_t currentWrite = write.load(std::memory_order_acquire);
+        const size_t available = UsedSamples(currentRead, currentWrite, capacity);
 
-        size_t toRead = (std::min)(samples, available);
+        const size_t toRead = (std::min)(samples, available);
         if (toRead == 0)
         {
             return 0;
         }
 
         // Batch copy with wrap-around handling
-        size_t firstChunk = (std::min)(toRead, capacity - currentRead);
-        std::copy_n(&buffer[currentRead], firstChunk, out);
+        const size_t readOffset = currentRead % capacity;
+        const size_t firstChunk = (std::min)(toRead, capacity - readOffset);
+        std::copy_n(buffer.data() + readOffset, firstChunk, out);
 
         if (toRead > firstChunk)
         {
-            size_t secondChunk = toRead - firstChunk;
-            std::copy_n(&buffer[0], secondChunk, out + firstChunk);
+            const size_t secondChunk = toRead - firstChunk;
+            std::copy_n(buffer.data(), secondChunk, out + firstChunk);
         }
 
-        size_t newRead = (currentRead + toRead) % capacity;
-        read.store(newRead, std::memory_order_release);
-        count.fetch_sub(toRead, std::memory_order_acq_rel);
+        read.store(currentRead + toRead, std::memory_order_release);
 
         return toRead;
     }

@@ -10,6 +10,28 @@
 #include "SampleConverterSIMD.h"
 #include <immintrin.h> // AVX2 intrinsics
 
+namespace
+{
+    float ClampUnitSample(float v)
+    {
+        if (v > 1.0f)
+            return 1.0f;
+        if (v < -1.0f)
+            return -1.0f;
+        return v;
+    }
+
+    float ScaleAndClampSample(float v, float scale_factor, float min_value, float max_value)
+    {
+        float scaled = ClampUnitSample(v) * scale_factor;
+        if (scaled > max_value)
+            return max_value;
+        if (scaled < min_value)
+            return min_value;
+        return scaled;
+    }
+}
+
 namespace AudioSampleConverter
 {
     namespace SIMD
@@ -56,17 +78,8 @@ namespace AudioSampleConverter
 
             for (; i < count; ++i)
             {
-                float v = input[i];
-                if (v > 1.0f)
-                    v = 1.0f;
-                if (v < -1.0f)
-                    v = -1.0f;
-                float scaled = v * 32768.0f;
-                if (scaled > 32767.0f)
-                    scaled = 32767.0f;
-                if (scaled < -32768.0f)
-                    scaled = -32768.0f;
-                output[i] = static_cast<int16_t>(scaled);
+                output[i] = static_cast<int16_t>(
+                    ScaleAndClampSample(input[i], 32768.0f, -32768.0f, 32767.0f));
             }
         }
 
@@ -210,17 +223,8 @@ namespace AudioSampleConverter
 
             for (; i < count; ++i)
             {
-                float v = input[i];
-                if (v > 1.0f)
-                    v = 1.0f;
-                if (v < -1.0f)
-                    v = -1.0f;
-                float scaled = v * scale_factor;
-                if (scaled > scale_factor - 1.0f)
-                    scaled = scale_factor - 1.0f;
-                if (scaled < -scale_factor)
-                    scaled = -scale_factor;
-                output[i] = static_cast<int32_t>(scaled);
+                output[i] = static_cast<int32_t>(
+                    ScaleAndClampSample(input[i], scale_factor, -scale_factor, scale_factor - 1.0f));
             }
         }
 
