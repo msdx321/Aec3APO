@@ -214,11 +214,11 @@ private:
                                           UINT32 frames,
                                           UINT64 inputQpc,
                                           APO_BUFFER_FLAGS outputBufferFlags);
-    void ProcessSpeexFrame(std::vector<float> &captureFrameScratch, size_t frameSize, UINT64 captureQpc);
-    bool PrepareRnnoiseInput(std::vector<float> &captureFrameScratch, size_t frameSize);
+    void ProcessSpeexFrame(std::vector<float> &captureFrameScratch, UINT64 captureQpc);
+    bool PrepareRnnoiseInput(std::vector<float> &captureFrameScratch);
     void RunRnnoiseFrame();
-    void CopyRnnoiseOutputToCapture(std::vector<float> &captureFrameScratch, size_t frameSize);
-    void ProcessRnnoiseFrame(std::vector<float> &captureFrameScratch, size_t frameSize);
+    void CopyRnnoiseOutputToCapture(std::vector<float> &captureFrameScratch);
+    void ProcessRnnoiseFrame(std::vector<float> &captureFrameScratch);
 
     CComPtr<IAudioProcessingObjectLoggingService> m_apoLoggingService;
     SampleFifo m_outputFifo;

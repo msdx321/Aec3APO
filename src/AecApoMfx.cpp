@@ -489,8 +489,8 @@ void CAecApoMFX::ProcessCaptureFrame(const float *frameData, UINT64 captureFrame
     }
 
     std::copy_n(frameData, m_frameSize, m_captureFrameScratch.data());
-    ProcessSpeexFrame(m_captureFrameScratch, m_frameSize, captureFrameQpc);
-    ProcessRnnoiseFrame(m_captureFrameScratch, m_frameSize);
+    ProcessSpeexFrame(m_captureFrameScratch, captureFrameQpc);
+    ProcessRnnoiseFrame(m_captureFrameScratch);
     m_outputFifo.Push(m_captureFrameScratch.data(), m_frameSize);
 }
 
@@ -646,13 +646,14 @@ CAecApoMFX::ReferenceLookupStatus CAecApoMFX::TryGetRenderReferenceFrame(UINT64 
     return ReferenceLookupStatus::kMatched;
 }
 
-void CAecApoMFX::ProcessSpeexFrame(std::vector<float> &captureFrameScratch, size_t frameSize, UINT64 captureQpc)
+void CAecApoMFX::ProcessSpeexFrame(std::vector<float> &captureFrameScratch, UINT64 captureQpc)
 {
     if (!m_speexState)
     {
         return;
     }
 
+    const size_t frameSize = m_frameSize;
     std::vector<float> &renderFrameScratch = m_speexRenderFrameScratch;
     std::vector<int16_t> &speexMic16 = m_speexMic16;
     std::vector<int16_t> &speexRef16 = m_speexRef16;
@@ -725,8 +726,9 @@ void CAecApoMFX::ProcessSpeexFrame(std::vector<float> &captureFrameScratch, size
         frameSize);
 }
 
-bool CAecApoMFX::PrepareRnnoiseInput(std::vector<float> &captureFrameScratch, size_t frameSize)
+bool CAecApoMFX::PrepareRnnoiseInput(std::vector<float> &captureFrameScratch)
 {
+    const size_t frameSize = m_frameSize;
     if (m_rnnoiseInputScratch.size() < static_cast<size_t>(m_rnnoiseFrameSize) ||
         m_rnnoiseOutputScratch.size() < static_cast<size_t>(m_rnnoiseFrameSize))
     {
@@ -787,8 +789,9 @@ void CAecApoMFX::RunRnnoiseFrame()
         kRnnoisePcmInvScale);
 }
 
-void CAecApoMFX::CopyRnnoiseOutputToCapture(std::vector<float> &captureFrameScratch, size_t frameSize)
+void CAecApoMFX::CopyRnnoiseOutputToCapture(std::vector<float> &captureFrameScratch)
 {
+    const size_t frameSize = m_frameSize;
     if (m_rnnoiseResamplerIn && m_rnnoiseResamplerOut)
     {
         spx_uint32_t inLen = static_cast<spx_uint32_t>(m_rnnoiseFrameSize);
@@ -810,20 +813,20 @@ void CAecApoMFX::CopyRnnoiseOutputToCapture(std::vector<float> &captureFrameScra
     }
 }
 
-void CAecApoMFX::ProcessRnnoiseFrame(std::vector<float> &captureFrameScratch, size_t frameSize)
+void CAecApoMFX::ProcessRnnoiseFrame(std::vector<float> &captureFrameScratch)
 {
     if (!m_rnnoiseState || m_rnnoiseFrameSize <= 0)
     {
         return;
     }
 
-    if (!PrepareRnnoiseInput(captureFrameScratch, frameSize))
+    if (!PrepareRnnoiseInput(captureFrameScratch))
     {
         return;
     }
 
     RunRnnoiseFrame();
-    CopyRnnoiseOutputToCapture(captureFrameScratch, frameSize);
+    CopyRnnoiseOutputToCapture(captureFrameScratch);
 }
 
 //
