@@ -122,6 +122,19 @@ function Invoke-NativeCommand {
     }
 }
 
+function Assert-PathExists {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$Path,
+        [Parameter(Mandatory=$true)]
+        [string]$Message
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        throw $Message
+    }
+}
+
 $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     throw "This script must be run in an elevated PowerShell to write HKLM and install the SWC device."
@@ -138,30 +151,20 @@ if ($BuildOutputPath) {
     $buildDir = Join-Path $BuildRoot (Join-Path "build\$Platform" $Configuration)
     $sourceDll = Join-Path $buildDir "AecApo.dll"
 }
-if (-not (Test-Path -LiteralPath $sourceDll)) {
-    throw "Built DLL not found: $sourceDll. Build $Configuration|$Platform first or pass -BuildOutputPath."
-}
+Assert-PathExists -Path $sourceDll -Message "Built DLL not found: $sourceDll. Build $Configuration|$Platform first or pass -BuildOutputPath."
 
 $buildObjDir = Join-Path $BuildRoot (Join-Path "build\obj\$Platform" $Configuration)
 $sourceComponentInf = Join-Path $buildObjDir "aec3apo_component.inf"
 $sourceExtensionInf = Join-Path $buildObjDir "aec3apo_extension.inf"
-if (-not (Test-Path -LiteralPath $sourceComponentInf)) {
-    throw "Built component INF not found: $sourceComponentInf. Build $Configuration|$Platform first."
-}
-if (-not (Test-Path -LiteralPath $sourceExtensionInf)) {
-    throw "Built extension INF not found: $sourceExtensionInf. Build $Configuration|$Platform first."
-}
+Assert-PathExists -Path $sourceComponentInf -Message "Built component INF not found: $sourceComponentInf. Build $Configuration|$Platform first."
+Assert-PathExists -Path $sourceExtensionInf -Message "Built extension INF not found: $sourceExtensionInf. Build $Configuration|$Platform first."
 
 Copy-Item -LiteralPath $sourceDll -Destination (Join-Path $DriverDir "AecApo.dll") -Force
 Copy-Item -LiteralPath $sourceComponentInf -Destination $InfPath -Force
 Copy-Item -LiteralPath $sourceExtensionInf -Destination $ExtensionInfPath -Force
 
-if (-not (Test-Path -LiteralPath $InfPath)) {
-    throw "INF not found after refresh: $InfPath"
-}
-if (-not (Test-Path -LiteralPath $ExtensionInfPath)) {
-    throw "Extension INF not found after refresh: $ExtensionInfPath"
-}
+Assert-PathExists -Path $InfPath -Message "INF not found after refresh: $InfPath"
+Assert-PathExists -Path $ExtensionInfPath -Message "Extension INF not found after refresh: $ExtensionInfPath"
 
 if (-not $PfxPath) {
     $PfxPath = Join-Path $DriverDir "aec3apo_test.pfx"
@@ -200,9 +203,7 @@ if (Test-Path -LiteralPath $catPath) {
 }
 Invoke-NativeCommand -FilePath $inf2cat -ArgumentList @("/driver:$DriverDir", "/os:$Inf2CatOs")
 
-if (-not (Test-Path -LiteralPath $catPath)) {
-    throw "Catalog not generated: $catPath"
-}
+Assert-PathExists -Path $catPath -Message "Catalog not generated: $catPath"
 
 $sigArgs = @("sign", "/fd", "SHA256", "/f", $PfxPath)
 if ($PfxPassword) {
