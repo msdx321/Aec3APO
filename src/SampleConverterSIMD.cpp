@@ -8,27 +8,19 @@
 //
 
 #include "SampleConverterSIMD.h"
+#include <algorithm>
 #include <immintrin.h> // AVX2 intrinsics
 
 namespace
 {
     float ClampUnitSample(float v)
     {
-        if (v > 1.0f)
-            return 1.0f;
-        if (v < -1.0f)
-            return -1.0f;
-        return v;
+        return (std::clamp)(v, -1.0f, 1.0f);
     }
 
     float ScaleAndClampSample(float v, float scale_factor, float min_value, float max_value)
     {
-        float scaled = ClampUnitSample(v) * scale_factor;
-        if (scaled > max_value)
-            return max_value;
-        if (scaled < min_value)
-            return min_value;
-        return scaled;
+        return (std::clamp)(ClampUnitSample(v) * scale_factor, min_value, max_value);
     }
 }
 
