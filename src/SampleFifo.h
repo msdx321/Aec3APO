@@ -102,6 +102,38 @@ struct SampleFifo
         return (std::min)(currentWrite - currentRead, maxCapacity);
     }
 
+    static void CopyIntoCircularBuffer(float *destination,
+                                       size_t destinationCapacity,
+                                       size_t destinationOffset,
+                                       const float *source,
+                                       size_t samples)
+    {
+        const size_t firstChunk = (std::min)(samples, destinationCapacity - destinationOffset);
+        std::copy_n(source, firstChunk, destination + destinationOffset);
+
+        if (samples > firstChunk)
+        {
+            const size_t secondChunk = samples - firstChunk;
+            std::copy_n(source + firstChunk, secondChunk, destination);
+        }
+    }
+
+    static void CopyFromCircularBuffer(float *destination,
+                                       const float *source,
+                                       size_t sourceCapacity,
+                                       size_t sourceOffset,
+                                       size_t samples)
+    {
+        const size_t firstChunk = (std::min)(samples, sourceCapacity - sourceOffset);
+        std::copy_n(source + sourceOffset, firstChunk, destination);
+
+        if (samples > firstChunk)
+        {
+            const size_t secondChunk = samples - firstChunk;
+            std::copy_n(source, secondChunk, destination + firstChunk);
+        }
+    }
+
     size_t Count() const
     {
         const size_t currentRead = read.load(std::memory_order_acquire);
@@ -139,14 +171,7 @@ struct SampleFifo
 
         // Batch copy with wrap-around handling
         const size_t writeOffset = currentWrite % capacity;
-        const size_t firstChunk = (std::min)(samples, capacity - writeOffset);
-        std::copy_n(data, firstChunk, buffer.data() + writeOffset);
-
-        if (samples > firstChunk)
-        {
-            const size_t secondChunk = samples - firstChunk;
-            std::copy_n(data + firstChunk, secondChunk, buffer.data());
-        }
+        CopyIntoCircularBuffer(buffer.data(), capacity, writeOffset, data, samples);
 
         write.store(currentWrite + samples, std::memory_order_release);
     }
@@ -171,14 +196,7 @@ struct SampleFifo
 
         // Batch copy with wrap-around handling
         const size_t readOffset = currentRead % capacity;
-        const size_t firstChunk = (std::min)(toRead, capacity - readOffset);
-        std::copy_n(buffer.data() + readOffset, firstChunk, out);
-
-        if (toRead > firstChunk)
-        {
-            const size_t secondChunk = toRead - firstChunk;
-            std::copy_n(buffer.data(), secondChunk, out + firstChunk);
-        }
+        CopyFromCircularBuffer(out, buffer.data(), capacity, readOffset, toRead);
 
         read.store(currentRead + toRead, std::memory_order_release);
 
