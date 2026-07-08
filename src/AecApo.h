@@ -13,7 +13,7 @@
 #include "AecApoDll_h.h"
 
 #include <commonmacros.h>
-#include <devicetopology.h>
+#include <mmdeviceapi.h>
 
 #include <audioengineextensionapo.h>
 #include <vector>
