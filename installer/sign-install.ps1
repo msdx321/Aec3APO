@@ -108,6 +108,20 @@ function Add-CertificateToStore {
     }
 }
 
+function Invoke-NativeCommand {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$FilePath,
+        [Parameter(Mandatory=$true)]
+        [string[]]$ArgumentList
+    )
+
+    & $FilePath @ArgumentList
+    if ($LASTEXITCODE -ne 0) {
+        exit $LASTEXITCODE
+    }
+}
+
 $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     throw "This script must be run in an elevated PowerShell to write HKLM and install the SWC device."
@@ -184,10 +198,7 @@ $catPath = Join-Path $DriverDir "aec3apo.cat"
 if (Test-Path -LiteralPath $catPath) {
     Remove-Item -LiteralPath $catPath -Force
 }
-& $inf2cat /driver:$DriverDir /os:$Inf2CatOs
-if ($LASTEXITCODE -ne 0) {
-    exit $LASTEXITCODE
-}
+Invoke-NativeCommand -FilePath $inf2cat -ArgumentList @("/driver:$DriverDir", "/os:$Inf2CatOs")
 
 if (-not (Test-Path -LiteralPath $catPath)) {
     throw "Catalog not generated: $catPath"
@@ -199,20 +210,11 @@ if ($PfxPassword) {
 }
 $sigArgs += @("/tr", $TimestampUrl, "/td", "SHA256", $catPath)
 
-& $signtool @sigArgs
-if ($LASTEXITCODE -ne 0) {
-    exit $LASTEXITCODE
-}
+Invoke-NativeCommand -FilePath $signtool -ArgumentList $sigArgs
 
-& pnputil /add-driver $InfPath /install
-if ($LASTEXITCODE -ne 0) {
-    exit $LASTEXITCODE
-}
+Invoke-NativeCommand -FilePath "pnputil" -ArgumentList @("/add-driver", $InfPath, "/install")
 
-& pnputil /add-driver $ExtensionInfPath /install
-if ($LASTEXITCODE -ne 0) {
-    exit $LASTEXITCODE
-}
+Invoke-NativeCommand -FilePath "pnputil" -ArgumentList @("/add-driver", $ExtensionInfPath, "/install")
 
 Restart-Service Audiosrv -Force
 Restart-Service AudioEndpointBuilder -Force
