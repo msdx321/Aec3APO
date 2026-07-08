@@ -15,6 +15,19 @@ namespace AudioSampleConverter
 {
     namespace SIMD
     {
+        static inline __m256 ClampVector(__m256 value, __m256 minValue, __m256 maxValue)
+        {
+            return _mm256_min_ps(_mm256_max_ps(value, minValue), maxValue);
+        }
+
+        static inline __m256 ScaleAndClampVector(__m256 value,
+                                                 __m256 scale,
+                                                 __m256 minValue,
+                                                 __m256 maxValue)
+        {
+            return ClampVector(_mm256_mul_ps(value, scale), minValue, maxValue);
+        }
+
         //
         // Float to Int16 Conversion with AVX2 (AVX2 required)
         // Optimized for audio frame processing - assumes count is multiple of 16
@@ -25,31 +38,33 @@ namespace AudioSampleConverter
             const __m256 scale = _mm256_set1_ps(kInt16ScaleFactor);
             const __m256 max_val = _mm256_set1_ps(kInt16MaxValue);
             const __m256 min_val = _mm256_set1_ps(kInt16MinValue);
-            const __m256 one = _mm256_set1_ps(1.0f);
-            const __m256 neg_one = _mm256_set1_ps(-1.0f);
+            const __m256 unit_max = _mm256_set1_ps(1.0f);
+            const __m256 unit_min = _mm256_set1_ps(-1.0f);
 
             size_t i = 0;
             // Process in chunks of 16 samples
             for (; i + 15 < count; i += 16)
             {
-                __m256 f0 = _mm256_loadu_ps(input + i);
-                __m256 f1 = _mm256_loadu_ps(input + i + 8);
-
-                // Clamp to [-1.0, 1.0]
-                f0 = _mm256_min_ps(_mm256_max_ps(f0, neg_one), one);
-                f1 = _mm256_min_ps(_mm256_max_ps(f1, neg_one), one);
-
-                // Scale and clamp to int16 range
-                f0 = _mm256_min_ps(_mm256_max_ps(_mm256_mul_ps(f0, scale), min_val), max_val);
-                f1 = _mm256_min_ps(_mm256_max_ps(_mm256_mul_ps(f1, scale), min_val), max_val);
+                const __m256 f0 = ScaleAndClampVector(
+                    ClampVector(_mm256_loadu_ps(input + i), unit_min, unit_max),
+                    scale,
+                    min_val,
+                    max_val);
+                const __m256 f1 = ScaleAndClampVector(
+                    ClampVector(_mm256_loadu_ps(input + i + 8), unit_min, unit_max),
+                    scale,
+                    min_val,
+                    max_val);
 
                 // Convert to int32
-                __m256i i0 = _mm256_cvtps_epi32(f0);
-                __m256i i1 = _mm256_cvtps_epi32(f1);
+                const __m256i i0 = _mm256_cvtps_epi32(f0);
+                const __m256i i1 = _mm256_cvtps_epi32(f1);
 
                 // Pack to int16
-                __m128i packed0 = _mm_packs_epi32(_mm256_castsi256_si128(i0), _mm256_extracti128_si256(i0, 1));
-                __m128i packed1 = _mm_packs_epi32(_mm256_castsi256_si128(i1), _mm256_extracti128_si256(i1, 1));
+                const __m128i packed0 =
+                    _mm_packs_epi32(_mm256_castsi256_si128(i0), _mm256_extracti128_si256(i0, 1));
+                const __m128i packed1 =
+                    _mm_packs_epi32(_mm256_castsi256_si128(i1), _mm256_extracti128_si256(i1, 1));
 
                 _mm_storeu_si128(reinterpret_cast<__m128i *>(output + i), packed0);
                 _mm_storeu_si128(reinterpret_cast<__m128i *>(output + i + 8), packed1);
@@ -77,16 +92,20 @@ namespace AudioSampleConverter
             size_t i = 0;
             for (; i + 15 < count; i += 16)
             {
-                __m128i i16_0 = _mm_loadu_si128(reinterpret_cast<const __m128i *>(input + i));
-                __m128i i16_1 = _mm_loadu_si128(reinterpret_cast<const __m128i *>(input + i + 8));
+                const __m128i i16_0 = _mm_loadu_si128(reinterpret_cast<const __m128i *>(input + i));
+                const __m128i i16_1 = _mm_loadu_si128(reinterpret_cast<const __m128i *>(input + i + 8));
 
                 // Unpack to int32 with sign extension
-                __m256i i32_0 = _mm256_set_m128i(_mm_cvtepi16_epi32(_mm_srli_si128(i16_0, 8)), _mm_cvtepi16_epi32(i16_0));
-                __m256i i32_1 = _mm256_set_m128i(_mm_cvtepi16_epi32(_mm_srli_si128(i16_1, 8)), _mm_cvtepi16_epi32(i16_1));
+                const __m256i i32_0 =
+                    _mm256_set_m128i(_mm_cvtepi16_epi32(_mm_srli_si128(i16_0, 8)),
+                                     _mm_cvtepi16_epi32(i16_0));
+                const __m256i i32_1 =
+                    _mm256_set_m128i(_mm_cvtepi16_epi32(_mm_srli_si128(i16_1, 8)),
+                                     _mm_cvtepi16_epi32(i16_1));
 
                 // Convert to float and scale
-                __m256 f0 = _mm256_mul_ps(_mm256_cvtepi32_ps(i32_0), inv_scale);
-                __m256 f1 = _mm256_mul_ps(_mm256_cvtepi32_ps(i32_1), inv_scale);
+                const __m256 f0 = _mm256_mul_ps(_mm256_cvtepi32_ps(i32_0), inv_scale);
+                const __m256 f1 = _mm256_mul_ps(_mm256_cvtepi32_ps(i32_1), inv_scale);
 
                 _mm256_storeu_ps(output + i, f0);
                 _mm256_storeu_ps(output + i + 8, f1);
@@ -108,9 +127,8 @@ namespace AudioSampleConverter
             size_t i = 0;
             for (; i + 7 < count; i += 8)
             {
-                __m256 v = _mm256_loadu_ps(data + i);
-                v = _mm256_mul_ps(v, scale);
-                _mm256_storeu_ps(data + i, v);
+                const __m256 scaled = _mm256_mul_ps(_mm256_loadu_ps(data + i), scale);
+                _mm256_storeu_ps(data + i, scaled);
             }
 
             for (; i < count; ++i)
@@ -187,21 +205,19 @@ namespace AudioSampleConverter
             const __m256 scale = _mm256_set1_ps(scale_factor);
             const __m256 max_val = _mm256_set1_ps(scale_factor - 1.0f);
             const __m256 min_val = _mm256_set1_ps(-scale_factor);
-            const __m256 one = _mm256_set1_ps(1.0f);
-            const __m256 neg_one = _mm256_set1_ps(-1.0f);
+            const __m256 unit_max = _mm256_set1_ps(1.0f);
+            const __m256 unit_min = _mm256_set1_ps(-1.0f);
 
             size_t i = 0;
             for (; i + 7 < count; i += 8)
             {
-                __m256 f = _mm256_loadu_ps(input + i);
+                const __m256 f = ScaleAndClampVector(
+                    ClampVector(_mm256_loadu_ps(input + i), unit_min, unit_max),
+                    scale,
+                    min_val,
+                    max_val);
 
-                // Clamp to [-1.0, 1.0]
-                f = _mm256_min_ps(_mm256_max_ps(f, neg_one), one);
-
-                // Scale and clamp
-                f = _mm256_min_ps(_mm256_max_ps(_mm256_mul_ps(f, scale), min_val), max_val);
-
-                __m256i i32 = _mm256_cvtps_epi32(f);
+                const __m256i i32 = _mm256_cvtps_epi32(f);
                 _mm256_storeu_si256(reinterpret_cast<__m256i *>(output + i), i32);
             }
 
@@ -222,8 +238,8 @@ namespace AudioSampleConverter
             size_t i = 0;
             for (; i + 7 < count; i += 8)
             {
-                __m256i i32 = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(input + i));
-                __m256 f = _mm256_mul_ps(_mm256_cvtepi32_ps(i32), inv_scale);
+                const __m256i i32 = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(input + i));
+                const __m256 f = _mm256_mul_ps(_mm256_cvtepi32_ps(i32), inv_scale);
                 _mm256_storeu_ps(output + i, f);
             }
 
