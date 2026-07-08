@@ -70,6 +70,11 @@ namespace
         return (kRnnoiseSampleRateHz * kRnnoiseVadGraceMs) / 1000;
     }
 
+    static UINT64 QpcDistance(UINT64 lhs, UINT64 rhs)
+    {
+        return (lhs > rhs) ? (lhs - rhs) : (rhs - lhs);
+    }
+
     static bool IsSupportedAecSampleRate(float rate_hz)
     {
         return std::any_of(kSupportedSampleRatesHz.begin(), kSupportedSampleRatesHz.end(),
@@ -634,7 +639,7 @@ CAecApoMFX::ReferenceLookupStatus CAecApoMFX::TryGetRenderReferenceFrame(UINT64 
             continue;
         }
 
-        const UINT64 delta = (frameQpc > targetQpc) ? (frameQpc - targetQpc) : (targetQpc - frameQpc);
+        const UINT64 delta = QpcDistance(frameQpc, targetQpc);
         if (delta < bestDelta)
         {
             bestDelta = delta;
@@ -706,7 +711,7 @@ void CAecApoMFX::ProcessSpeexFrame(std::vector<float> &captureFrameScratch, UINT
             const UINT64 minDelayQpc = (m_qpcTicksPerSecond * kMinEchoDelayMs) / 1000;
             const UINT64 maxDelayQpc = (m_qpcTicksPerSecond * kMaxEchoDelayMs) / 1000;
             const UINT64 observedDelayQpc = static_cast<UINT64>(referenceDelta);
-            const UINT64 clampedDelayQpc = (std::min)((std::max)(observedDelayQpc, minDelayQpc), maxDelayQpc);
+            const UINT64 clampedDelayQpc = (std::clamp)(observedDelayQpc, minDelayQpc, maxDelayQpc);
             const UINT64 estimatedDelayQpc = m_estimatedEchoDelayQpc.load(std::memory_order_relaxed);
 
             if (estimatedDelayQpc == 0)
