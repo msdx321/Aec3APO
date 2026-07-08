@@ -787,9 +787,7 @@ bool CAecApoMFX::PrepareRnnoiseInput(std::vector<float> &captureFrameScratch, si
         return false;
     }
 
-    std::copy(captureFrameScratch.begin(),
-              captureFrameScratch.begin() + frameSize,
-              m_rnnoiseInputScratch.begin());
+    std::copy_n(captureFrameScratch.begin(), frameSize, m_rnnoiseInputScratch.begin());
     return true;
 }
 
@@ -801,9 +799,9 @@ void CAecApoMFX::RunRnnoiseFrame()
         m_rnnoiseFrameSize,
         kRnnoisePcmScale);
 
-    float vad = rnnoise_process_frame(m_rnnoiseState.get(),
-                                      m_rnnoiseOutputScratch.data(),
-                                      m_rnnoiseInputScratch.data());
+    const float vad = rnnoise_process_frame(m_rnnoiseState.get(),
+                                            m_rnnoiseOutputScratch.data(),
+                                            m_rnnoiseInputScratch.data());
     m_rnnoiseFramesProcessed.fetch_add(1, std::memory_order_relaxed);
     if (vad >= kRnnoiseVadThreshold)
     {
@@ -841,9 +839,7 @@ void CAecApoMFX::CopyRnnoiseOutputToCapture(std::vector<float> &captureFrameScra
     }
     else
     {
-        std::copy(m_rnnoiseOutputScratch.begin(),
-                  m_rnnoiseOutputScratch.begin() + frameSize,
-                  captureFrameScratch.begin());
+        std::copy_n(m_rnnoiseOutputScratch.begin(), frameSize, captureFrameScratch.begin());
     }
 }
 
@@ -963,7 +959,7 @@ void CAecApoMFX::InitializeSpeexProcessors()
     m_speexFrameSize = static_cast<int>(m_frameSize);
     if (m_speexFrameSize > 0)
     {
-        int filterLen = m_speexFrameSize * kFilterTailMultiplier;
+        const int filterLen = m_speexFrameSize * kFilterTailMultiplier;
         m_speexState.reset(speex_echo_state_init(m_speexFrameSize, filterLen));
         if (m_speexState)
         {
