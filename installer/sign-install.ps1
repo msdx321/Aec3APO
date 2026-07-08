@@ -189,11 +189,6 @@ if (-not $PfxPath) {
     $securePassword = ConvertTo-SecureString -String $PfxPassword -Force -AsPlainText
     Export-PfxCertificate -Cert $cert -FilePath $PfxPath -Password $securePassword | Out-Null
 
-    # Trust the cert for driver install.
-    if ($TrustStore -eq "LocalMachine") {
-        # Already ensured admin above.
-    }
-
     Add-CertificateToStore -Certificate $cert -StoreName "Root" -StoreLocation $TrustStore
     Add-CertificateToStore -Certificate $cert -StoreName "TrustedPublisher" -StoreLocation $TrustStore
 }
