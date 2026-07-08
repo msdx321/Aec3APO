@@ -1463,19 +1463,12 @@ static HRESULT IsFormatSupportedForAec(
         const AecSampleFormat sampleFormat = GetAecSampleFormat(format);
         const bool formatValid = sampleFormat != AecSampleFormat::kUnknown &&
                                  IsSupportedAecSampleRate(format.fFramesPerSecond);
+        const bool channelCountValid = requireMono
+                                           ? format.dwSamplesPerFrame == 1
+                                           : format.dwSamplesPerFrame > 0 &&
+                                                 format.dwSamplesPerFrame <= maxChannels;
 
-        if (requireMono)
-        {
-            // Output must be mono
-            *pSupported = formatValid && format.dwSamplesPerFrame == 1;
-        }
-        else
-        {
-            // Input can be multi-channel
-            *pSupported = formatValid &&
-                          format.dwSamplesPerFrame > 0 &&
-                          format.dwSamplesPerFrame <= maxChannels;
-        }
+        *pSupported = formatValid && channelCountValid;
     }
 
 exit:
