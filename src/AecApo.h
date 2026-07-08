@@ -232,7 +232,6 @@ private:
     std::vector<float> m_outputScratch;
     SpeexRAII::EchoStatePtr m_speexState;
     SpeexResamplerRAII::ResamplerStatePtr m_renderResampler;
-    int m_speexFrameSize = 0;
     std::vector<int16_t> m_speexMic16;
     std::vector<int16_t> m_speexRef16;
     std::vector<int16_t> m_speexOut16;

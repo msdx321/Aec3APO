@@ -922,11 +922,11 @@ void CAecApoMFX::InitializeSpeexProcessors()
     // Reset Speex states (RAII unique_ptr handles destruction)
     m_speexState.reset();
 
-    m_speexFrameSize = static_cast<int>(m_frameSize);
-    if (m_speexFrameSize > 0)
+    const int speexFrameSize = static_cast<int>(m_frameSize);
+    if (speexFrameSize > 0)
     {
-        const int filterLen = m_speexFrameSize * kFilterTailMultiplier;
-        m_speexState.reset(speex_echo_state_init(m_speexFrameSize, filterLen));
+        const int filterLen = speexFrameSize * kFilterTailMultiplier;
+        m_speexState.reset(speex_echo_state_init(speexFrameSize, filterLen));
         if (m_speexState)
         {
             speex_echo_ctl(m_speexState.get(), SPEEX_ECHO_SET_SAMPLING_RATE, &m_sampleRateHz);
